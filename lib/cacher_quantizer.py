@@ -25,6 +25,12 @@ class BasePipe(StableDiffusionXLPipeline):
       variant="fp16",
       local_files_only=True
       )
+    
+    # freeze model
+    for module in pipe.components.values():
+      if isinstance(module, torch.nn.Module):
+        for param in module.parameters():
+          param.requires_grad = False
     return pipe
 
 @cacher_quantizer_registry.add_to_registry("FREEU")
@@ -80,13 +86,13 @@ class HQQ3(BasePipe):
     q_unet(pipe, nbits=3)
     return pipe
 
-# @cacher_quantizer_registry.add_to_registry("VQDM4")
-# class VQDM4(BasePipe):
-#   @classmethod
-#   def from_pretrained(cls):
-#     pipe = super().from_pretrained()
-#     vqdm4_dir_path = "/home/mdnikolaev/philurame/Q_LIB/unets/vqdm_4"
-#     sys.path.append(vqdm4_dir_path) # add "src" to path
-#     unet = torch.load(os.path.join(vqdm4_dir_path, "quantized_unet.pickle"), map_location="cuda")    
-#     pipe.unet = unet
-#     return pipe
+@cacher_quantizer_registry.add_to_registry("VQDM4")
+class VQDM4(BasePipe):
+  @classmethod
+  def from_pretrained(cls):
+    pipe = super().from_pretrained()
+    vqdm4_dir_path = "/home/mdnikolaev/philurame/Q_LIB/unets/vqdm_4"
+    sys.path.append(vqdm4_dir_path) # add "src" to path
+    unet = torch.load(os.path.join(vqdm4_dir_path, "quantized_unet.pickle"), map_location="cuda")    
+    pipe.unet = unet
+    return pipe

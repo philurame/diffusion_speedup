@@ -1,27 +1,42 @@
 generate: 1
 
 solvers:
+# - EULER
 - DDIM
+# - DDIMHF
 - DPMS
-- DEIS
+# - DPMS3
+# - DPMSORIG
+# - DEIS
+# - DEIS3
+# - UNIPC
+# - UNIPC3
+# - IPNDM
 
 schedulers:
+# - DDIM
 - LINEAR
-- SNR
-- KARRAS
-- AYS
+# - AYS
+# - KARRAS
+# - SNR
 
 cachers_quantizers:
 - NONE
-- DEEPCACHE
+# - DEEPCACHE
+# - TGATE
+# - FREEU
+# - HQQ4
+# - HQQ3
 
 nfes:
+# - 5
+# - 7
 - 10
-- 17
-- 25
-- 50
-- 100
+# - 17
+# - 25
+# - 50
+# - 100
 
 datasets:
 - COCO
-- PARTI
+# - PARTI

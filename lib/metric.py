@@ -13,8 +13,8 @@ from utils.class_registry import ClassRegistry
 metrics_registry = ClassRegistry()
 
 class RequiredDataMixin:
-  def __init__(self, path_ddim, fake_imgs, real_imgs, real_anns,
-               pipe, nfe, verbose=True):
+  def __init__(self, path_ddim=None, fake_imgs=None, real_imgs=None, real_anns=None,
+               pipe=None, nfe=None, verbose=True, batch_size=512, bench_prompt='a photograph of an astronaut riding a horse'):
     self.path_ddim = path_ddim
     self.fake_imgs = fake_imgs
     self.real_imgs = real_imgs
@@ -22,9 +22,8 @@ class RequiredDataMixin:
     self.pipe = pipe
     self.nfe = nfe
     self.verbose = verbose
-    self.batch_size = 512
-    self.bench_prompt = 'a photograph of an astronaut riding a horse'
-
+    self.batch_size = batch_size
+    self.bench_prompt = bench_prompt
 #####################################################################################################
 # TFLOPS & SEC_PER_IMG
 #####################################################################################################

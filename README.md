@@ -1,3 +1,6 @@
+# TODO:
+- update README
+
 # PROJECT STRUCTURE
 - `pip install -r requirements.txt`
 - Launch via `python run_confpy.py` based on config in `config.yaml`

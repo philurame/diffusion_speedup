@@ -1,5 +1,5 @@
 import wandb, click
-import torch, os, sys
+import torch, os, sys, gc
 from diffusers import AutoencoderKL
 
 from lib.generate_decode import generate, decode_vae
@@ -19,19 +19,13 @@ def load_pipe(solver, scheduler, cacher_quantizer, is_optimize, add_vae):
   PipeClass = cacher_quantizer_registry[cacher_quantizer]
   SolverClass = solver_registry[solver]
   SchedulerClassMixin = scheduler_registry[scheduler]
-  
-  pipe = PipeClass.from_pretrained()
 
-  # freeze pipe
-  for module in pipe.components.values():
-    if isinstance(module, torch.nn.Module):
-      for param in module.parameters():
-        param.requires_grad = False
+  pipe = PipeClass.from_pretrained()
 
   class SolverSchedulerConstructor(SolverClass, SchedulerClassMixin):
     def set_timesteps(self, *args, **kwargs):
       SchedulerClassMixin.set_timesteps(self, *args, **kwargs)
-  pipe.scheduler = SolverSchedulerConstructor()
+  pipe.scheduler = SolverSchedulerConstructor.from_config()
 
   pipe = pipe.to('cuda')
   pipe.set_progress_bar_config(disable=True)  
@@ -58,6 +52,12 @@ def get_metrics(**kwargs):
     if hasattr(metricInstance, 'to'):
       metricInstance = metricInstance.to('cpu')
     res_metrics[metric_name] = metricInstance()
+
+    # try to free memory
+    del metricInstance
+    gc.collect()
+    torch.cuda.empty_cache()
+
   return res_metrics
 
 @click.command()
@@ -94,7 +94,7 @@ def main(**kwargs):
   assert isinstance(nfe, int) and nfe > 0
   assert os.path.exists(root)
   assert bool(is_generate) != os.path.exists(save_path)
-  assert bool(is_generate) or is_already_calculated(save_path, calculated_path=os.path.join(root, 'METRICS.csv'))
+  assert bool(is_generate) or not is_already_calculated(save_path, calculated_path=os.path.join(data_path, 'METRICS.csv'))
   assert 0 < max_samples <= 10000
 
   data = load_data(data_path, dataset, max_samples)
@@ -124,6 +124,9 @@ def main(**kwargs):
       gen_latents = torch.load(save_path, map_location='cpu')
       gen_imgs = decode_vae(pipe, gen_latents)
       del gen_latents
+    
+    gc.collect()
+    torch.cuda.empty_cache()
 
     # optimal LPIPS is not supported yet, so path_ddim is not needed actually
     path_ddim = os.path.join(data_path, cacher_quantizer, f'{dataset}_{nfe}', f'DDIM_{scheduler}.pt')
@@ -135,17 +138,15 @@ def main(**kwargs):
       pipe=pipe, 
       nfe=nfe
       )
-    
-     # add image for quick debug
-    metrics.update(add_sample_imgs(dataset, data, gen_imgs))
 
     ########################################
     # LOG
     ########################################
 
+    project_name = 'SDXL_METRICS_' + ('CACHERS' if cacher_quantizer != 'NONE' else 'SOLVERS')
     wandb.login(key=key, relogin=True)
     run = wandb.init(
-      project = 'SDXL_METRICS_UPDATE',
+      project = project_name,
       entity  = "philurame",
       name = f'{dataset}_{cacher_quantizer}_{solver}_{scheduler}_{nfe}',
       config = kwargs,
@@ -161,7 +162,9 @@ def main(**kwargs):
     run_path = os.path.join('wandb', run_path)
     os.system(f'wandb sync {run_path}')
 
+    print('_ALL_DONE')
+    sys.stdout.flush()
+
 
 if __name__ == '__main__':
   main()
-  print('_ALL_DONE')

@@ -7,18 +7,18 @@ solvers:
 - DPMS
 # - DPMS3
 # - DPMSORIG
-# - DEIS
+- DEIS
 # - DEIS3
-# - UNIPC
+- UNIPC
 # - UNIPC3
-# - IPNDM
+# - POLS
 
 schedulers:
 # - DDIM
 - LINEAR
-# - AYS
-# - KARRAS
-# - SNR
+- AYS
+- KARRAS
+- SNR
 
 cachers_quantizers:
 - NONE
@@ -30,8 +30,13 @@ cachers_quantizers:
 
 nfes:
 # - 5
+- 6
 # - 7
-- 10
+- 8
+- 9
+# - 10
+- 11
+- 12
 # - 17
 # - 25
 # - 50

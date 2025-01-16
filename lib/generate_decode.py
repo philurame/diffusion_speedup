@@ -14,7 +14,7 @@ def seed_everything(seed=42):
 def generate(pipe, anns, nfe, batch_size=16):
   latents_gen = torch.zeros((len(anns), 4, 128, 128), dtype=torch.float16, device='cuda')
   dataloader  = torch.utils.data.DataLoader(anns, batch_size=batch_size, shuffle=False, num_workers=0)
-
+  
   seed_everything(42)
   for i, prompts in tqdm(enumerate(dataloader), total=len(dataloader), desc='generate...'):
     generators = [torch.Generator(device='cpu').manual_seed(i*batch_size+g) for g in range(len(prompts))]
@@ -27,7 +27,6 @@ def generate(pipe, anns, nfe, batch_size=16):
                    )[0]
     latents_gen[i*batch_size:(i+1)*batch_size] = latents
   return latents_gen
-
 
 def decode_vae(pipe, fake_latents):
   fake_latents = fake_latents / pipe.vae.config.scaling_factor

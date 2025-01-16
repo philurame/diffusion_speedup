@@ -1,15 +1,16 @@
-from hqq.core.quantize import BaseQuantizeConfig, HQQLinear
-from utils.quant_utils import get_linear_and_conv_order, seed_everything
 import torch
+from registries import cacher_registry
+from lib.quantizers.mixin_quantizer import BasePipeMixin, get_linear_and_conv_layers, seed_everything
+from hqq.core.quantize import BaseQuantizeConfig, HQQLinear
 
 
 def q_unet(pipe, nbits=4):
-  all_layers = get_linear_and_conv_order(pipe)
+  all_layers = get_linear_and_conv_layers(pipe)
   quant_config = BaseQuantizeConfig(nbits=nbits, group_size=64)
 
   all_quantized = []
   seed_everything()
-  for layer in (all_layers):
+  for layer in all_layers:
     hqq_layer = HQQLinear(layer, #torch.nn.Linear or None 
                           quant_config=quant_config, #quantization configuration
                           compute_dtype=torch.float16, #compute dtype
@@ -31,4 +32,21 @@ def q_unet(pipe, nbits=4):
 
     for submodule, child_name in modules_to_update:
       setattr(submodule, child_name, quantized_layer)
-      
+  return all_quantized
+
+
+@cacher_registry.add_to_registry("HQQ4")
+class HQQ4(BasePipeMixin):
+  @classmethod
+  def from_pretrained(cls):
+    pipe = super().from_pretrained()
+    q_unet(pipe, nbits=4)
+    return pipe
+
+@cacher_registry.add_to_registry("HQQ3")
+class HQQ3(BasePipeMixin):
+  @classmethod
+  def from_pretrained(cls):
+    pipe = super().from_pretrained()
+    q_unet(pipe, nbits=3)
+    return pipe

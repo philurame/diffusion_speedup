@@ -1,27 +1,31 @@
-# TODO:
-- update README
-
 # PROJECT STRUCTURE
 - `pip install -r requirements.txt`
 - Launch via `python run_confpy.py` based on config in `config.yaml`
 - Usage examples in `notebooks`
 
-## `run_confpy.py`
-- takes product of all compbinations from `conif.yaml` and executes all generations (metric calculations)
+## `run_main.py`
+- takes product of all compbinations from `conif.yaml` and executes generations (metric calculations) with sbatch
 
-## `conif.yaml`
+## `config.yaml`
 - Configuration file for solvers, schedulers, cachers/quantizers
 
 ## `main.py`
 - With `generate=1` (in `conif.yaml`), generates latent images; with `generate=0`, computes metrics on pre-saved generated latents and logs to wandb
 
-## `lib/solver_scheduler.py`
-- Contains a registry for all available solvers and schedulers
-- Schedulers override `set_timesteps` based on their algorithm
+## `lib/solvers`
+- Contains all solvers implementations
 - Solvers include additional attributes for interaction with different schedulers
 
-## `lib/cacher_quantizer.py`
+## `lib/schedulers`
+- Contains all schedulers implementations
+- Schedulers override `set_timesteps` based on their algorithm
+
+## `lib/cachers`
 - Cachers modify `unet` and override `__call__` => each method initializes its own pipeline (i.e., currently, a cacher+quantizer combination is not possible)
+
+## `lib/registries.py`
+- Defines registries 
+
 
 # Implementation Details
 

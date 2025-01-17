@@ -1,5 +1,5 @@
 import torch
-from registries import cacher_registry
+from lib.registries import cacher_registry
 from lib.quantizers.mixin_quantizer import BasePipeMixin, get_linear_and_conv_layers, seed_everything
 from hqq.core.quantize import BaseQuantizeConfig, HQQLinear
 

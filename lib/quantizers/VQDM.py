@@ -1,5 +1,5 @@
 import torch, sys, os
-from registries import cacher_registry
+from lib.registries import cacher_registry
 from lib.quantizers.mixin_quantizer import BasePipeMixin
 
 @cacher_registry.add_to_registry("VQDM4")

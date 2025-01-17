@@ -1,5 +1,5 @@
 import numpy as np
-from registries import scheduler_registry
+from lib.registries import scheduler_registry
 from lib.schedulers.mixin_scheduler import BaseSchedulerMixin
 
 @scheduler_registry.add_to_registry("LINEAR")

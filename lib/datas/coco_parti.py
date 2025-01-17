@@ -1,5 +1,5 @@
 import pickle, os
-from registries import data_registry
+from lib.registries import data_registry
 
 @data_registry.add_to_registry('COCO')
 class COCO:

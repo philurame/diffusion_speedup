@@ -1,4 +1,4 @@
-from registries import solver_registry
+from lib.registries import solver_registry
 from lib.solvers.mixin_solver import BaseSolverMixin
 
 from diffusers import (

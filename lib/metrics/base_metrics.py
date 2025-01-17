@@ -1,4 +1,4 @@
-from registries import metric_registry
+from lib.registries import metric_registry
 from lib.metrics.mixin_metrics import MetricDataMixin
 
 import time, torch, os
@@ -23,7 +23,7 @@ class TFLOPSMetric(MetricDataMixin):
   def __call__(self):
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True, with_flops=True) as prof:
       with record_function("model_inference"):
-        self.pipe(self.tflops_prompt, 
+        self.pipe(self.bench_prompt, 
              num_inference_steps=self.nfe, 
              guidance_scale=5, 
              return_dict=False, 

@@ -1,4 +1,4 @@
-from registries import cacher_registry
+from lib.registries import cacher_registry
 from lib.cachers.mixin_cacher import BasePipeMixin
 
 from DeepCache import DeepCacheSDHelper

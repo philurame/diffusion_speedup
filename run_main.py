@@ -35,7 +35,7 @@ for dataset, nfe, solver, scheduler, cacher in product(datasets, nfes, solvers, 
 #SBATCH --gpus=1
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=72:00:00
+#SBATCH --time=02:00:00
 #SBATCH --constraint="[type_a|type_b|type_c|type_e]"
 #SBATCH --output={outdir}/{method}-%j.log
 

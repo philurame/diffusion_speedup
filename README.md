@@ -1,30 +1,41 @@
 # PROJECT STRUCTURE
 - `pip install -r requirements.txt`
-- Launch via `python run_confpy.py` based on config in `config.yaml`
+- Launch via `python run.py --generate X --wandb_key Y` based on config [config_generate.yaml](config_generate.yaml) (or [config_metric.yaml](config_metric.yaml)), `generate` boolean X and `wandb_key` str Y
 - Usage examples in `notebooks`
 
-## `run_main.py`
-- takes product of all compbinations from `conif.yaml` and executes generations (metric calculations) with sbatch
+## `COCO2017 & PARTI dataset`
+- can be downloaded in [this kaggle dataset](https://www.kaggle.com/datasets/philurame/coco2017-and-parti)
+- after downloading put it in the `DATA/datasets_coco_parti.pkl` path
 
-## `config.yaml`
+## `EDM` (and CIFAR metrics)
+- download [inceptionV3]('https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl') and put it the `lib/models/edm/InceptionV3.pkl` path
+- download [EDM model]('https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl') and put it the `lib/models/edm/edm-cifar10-32x32-uncond-vp.pkl` path
+
+## [run.py](run.py), [config_generate.yaml](config_generate.yaml) -> [main_generate.py](main_generate.py)
+### [run.py](run.py) 
+- takes product of all compbinations from [config_generate.yaml](config_generate.yaml) (or [config_metric.yaml](config_metric.yaml)) and executes [main_generate.py](main_generate.py) (or [main_metric.py](main_metric.py)) with sbatch
+- requires `wandb_key` and `generate` parameters
+
+### [config_generate.yaml](config_generate.yaml) ([config_metric.yaml](config_metric.yaml))
 - Configuration file for solvers, schedulers, cachers/quantizers
 
-## `main.py`
-- With `generate=1` (in `conif.yaml`), generates latent images; with `generate=0`, computes metrics on pre-saved generated latents and logs to wandb
+### [main_generate.py](main_generate.py)
+- generates latent images for `SDXL` and stores in [DATA/...](DATA)
 
-## `lib/solvers`
+### [main_metric.py](main_metric.py)
+- calculates metrics for stored latents and logs them into `wandb`
+
+## [solvers](lib/solvers)
 - Contains all solvers implementations
 - Solvers include additional attributes for interaction with different schedulers
 
-## `lib/schedulers`
+## [schedulers](lib/schedulers)
 - Contains all schedulers implementations
-- Schedulers override `set_timesteps` based on their algorithm
+- Schedulers must override `set_timesteps` based on their algorithm
 
-## `lib/cachers`
-- Cachers modify `unet` and override `__call__` => each method initializes its own pipeline (i.e., currently, a cacher+quantizer combination is not possible)
-
-## `lib/registries.py`
-- Defines registries 
+## [models](lib/models)
+- Contains all models (including EDM, SDXL) and their acceleration methods
+- `models` methods (like cachers and quantizers) usually modify `unet` and override `_call_impl` method (alias of `__call__`)
 
 
 # Implementation Details
@@ -93,7 +104,7 @@ rebalancing the contributions from the UNet’s skip connections and backbone fe
 
 ## Cachers, Quantizers
 
-### `DEEPCACHE` (cache_interval = 3, cache_branch_id = 0)
+### `DEEPCACHE`
 - caching unet starting from `cache_branch_id` skip connection and reusing it every `cache_interval` iterations (making full inference only 1 of cache_interval consecutive iterations)
 - hyperparameters should better be optimized
 
@@ -102,18 +113,15 @@ rebalancing the contributions from the UNet’s skip connections and backbone fe
 - the choice of parameter `m` (or `gate_step`) is due to interpolation of the “optimal” parameters from the paper: `(NFE, m)` = (15, 6), (25, 10), (50, 20), (100, 25) => `m ~ NFE//2.5`.
 - hyperparameters should better be optimized
 
-### `HQQ4`: Half-Quadratic Quantization in 4 bit
+### `HQQ`: Half-Quadratic Quantization
 - quantization of weights w.o. calibration data
 
 ![alt text](_tex_imgs/HQQ.png)
 <!-- $$\underset{W_e,\ Z,\ S}{\min}\left[\|W_e\|_{p<1}+\beta\|W_e-(W_f-\hat W_f(S,Z))\|^2_F\right]$$
 $$\hat W_f(S,Z)=S(\hat W - Z),\quad \hat W=\lfloor W S^{-1} + Z\rceil,\ \hat W-\text{4bit}$$ -->
 
-### `HQQ3`: Half-Quadratic Quantization in 3 bit
-- same as `HQQ4` for 3 bit quantization
 
-
-### `VQDM4`: Vector Quantized Diffusion Model in 4 bit
+### `VQDM`: Vector Quantized Diffusion Model
 - quantization of weights based on calibration data
 
 ![alt text](_tex_imgs/VQDM.png)

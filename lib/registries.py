@@ -22,7 +22,7 @@ class ClassRegistry:
 
 solver_registry    = ClassRegistry()
 scheduler_registry = ClassRegistry()
-cacher_registry    = ClassRegistry()
+model_registry     = ClassRegistry()
 data_registry      = ClassRegistry()
 metric_registry    = ClassRegistry()
 
@@ -37,7 +37,7 @@ def import_dir(path_dir):
   PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
   for root, dirs, files in os.walk(path_dir):
     for file in files:
-      if file.endswith(".py") and not file.startswith("__"):
+      if file.endswith(".py") and file.startswith("r_") and not file.startswith("__"):
         # Convert the file path into a module path e.g., root/custom/solvers/euler_solver.py -> custom.solvers.euler_solver
         module_name = os.path.splitext(file)[0]
         # Build the relative package path from PROJECT_ROOT
@@ -45,4 +45,4 @@ def import_dir(path_dir):
         package = rel_path.replace(os.sep, ".")
         full_module_name = f"{package}.{module_name}"
         importlib.import_module(full_module_name)
-        print(f"Loaded {full_module_name}")
+        # print(f"Loaded {full_module_name}")

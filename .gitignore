@@ -1,5 +1,9 @@
 __pycache__/
 
+# Ignore model weights and pickle files
+*.pt
+*.pkl
+
 # Ignore all files in DATA except for README.md and cifar_reference.pkl
 /DATA/*
 !/DATA/README.md
@@ -8,7 +12,3 @@ __pycache__/
 # Ignore all notebooks except the ones in the notebooks folder
 *.ipynb
 !/notebooks//*.ipynb
-
-# Ignore model weights and pickle files
-*.pt
-*.pkl

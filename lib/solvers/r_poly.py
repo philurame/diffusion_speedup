@@ -34,8 +34,8 @@ class PolSolver:
       self.sigmas[self.step_index - 1],
     )
     alpha_t, alpha_s0 = (
-      self.sigma_to_alpha_sigma_t(sigma_t),
-      self.sigma_to_alpha_sigma_t(sigma_s0),
+      self.sigma_to_alpha_t(sigma_t),
+      self.sigma_to_alpha_t(sigma_s0),
     )
     rho_t, rho_s0, rho_s1 = sigma_t, sigma_s0, sigma_s1
     phi_t, phi_s0, phi_s1 = rho_t ** gamma, rho_s0 ** gamma, rho_s1 ** gamma

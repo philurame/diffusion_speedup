@@ -1,6 +1,5 @@
 from lib.registries import scheduler_registry
 from lib.schedulers.mixin_scheduler import SchedulerMixin
-import torch
 import numpy as np
 
 @scheduler_registry.add_to_registry("AYS")

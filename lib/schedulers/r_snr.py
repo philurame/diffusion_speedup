@@ -1,6 +1,5 @@
 from lib.registries import scheduler_registry
 from lib.schedulers.mixin_scheduler import SchedulerMixin
-import torch
 import numpy as np
 
 @scheduler_registry.add_to_registry("SNR")
@@ -12,7 +11,7 @@ class SNRScheduler(SchedulerMixin):
     lambdas = self._convert_to_lu(in_lambdas=lambdas, num_inference_steps=num_inference_steps)
     sigmas = np.exp(lambdas)
     timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]).round()
-    self.prepare_solver_data(timesteps, device)
+    self.prepare_solver_data(timesteps, device, sigmas=sigmas)
 
   def _convert_to_lu(self, in_lambdas, num_inference_steps):
     lambda_min = in_lambdas[-1].item()

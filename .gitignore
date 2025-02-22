@@ -1,0 +1,8 @@
+__pycache__
+/DATA/*
+*.ipynb
+*.pt
+*.pkl
+!/DATA/README.md
+!/DATA/cifar_reference.pkl
+!/notebooks/**/*.ipynb

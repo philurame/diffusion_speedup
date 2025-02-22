@@ -7,8 +7,8 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 class LPIPS:
   def __call__(self, **kwargs):
 
-    n_imgs = 2048
-    batch_size = 256
+    n_imgs = 10_000
+    batch_size = 250
 
     path_ddim_200 = '/home/mdnikolaev/philurame/DIFFUSION_METRICS/DATA/imgs_ddim200_224.pt'
     imgs_200  = torch.load(path_ddim_200, weights_only=False, map_location='cpu')[:n_imgs]

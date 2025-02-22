@@ -67,5 +67,3 @@ class DPMS:
       - 0.5 * (alpha_t * (torch.exp(-h) - 1.0)) * D1
     )
     return x_t
-
-    

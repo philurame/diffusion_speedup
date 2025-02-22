@@ -112,17 +112,23 @@ class BaseSDXL(StableDiffusionXLPipeline):
     if output_type == "latent":
       return latents
     
-    # if output_type == "img" or anything else return pt
     needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast
     if needs_upcasting:
       self.upcast_vae()
       latents = latents.to(next(iter(self.vae.post_quant_conv.parameters())).dtype)
     latents = latents / self.vae.config.scaling_factor
-    imgs = self.vae.decode(latents.to('cuda'), return_dict=False)[0]
-    imgs = (self.image_processor.postprocess(imgs, output_type='pt')*255).to(device='cpu', dtype=torch.uint8)
+    imgs = self.vae.decode(latents.to(device), return_dict=False)[0]
+    imgs_pt = self.image_processor.postprocess(imgs, output_type='pt')
+    
     if needs_upcasting:
       self.vae.to(dtype=torch.float16)
-    return imgs
+    
+    if output_type == "pt": # returns -1 -> 1
+      return imgs_pt * 2 - 1
+
+    # if output_type == "img" or anything else return as uint8
+    imgs_255 = (imgs_pt*255).clip(0,255).to(device='cpu', dtype=torch.uint8)
+    return imgs_255
 
 
   def make_unet_solver_step(self, solver, latents, t, guidance_scale, **unet_kwargs):
@@ -160,7 +166,3 @@ class BaseSDXL(StableDiffusionXLPipeline):
     
     return timesteps, num_inference_steps
   
-
-#####################################################################################################################
-#####################################################################################################################
-

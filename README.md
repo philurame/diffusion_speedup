@@ -8,8 +8,8 @@
 - after downloading put it in the `DATA/datasets_coco_parti.pkl` path
 
 ## `EDM` (and CIFAR metrics)
-- download [inceptionV3](https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl) and put it the `lib/models/edm/InceptionV3.pkl` path
-- download [EDM model](https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl) and put it the `lib/models/edm/edm-cifar10-32x32-uncond-vp.pkl` path
+- download [inceptionV3](https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl) and put it the `DATA/InceptionV3.pkl` path
+- download [EDM model](https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl) and put it the `DATA/edm-cifar10-32x32-uncond-vp.pkl` path
 
 ## [run.py](run.py), [config_generate.yaml](config_generate.yaml) -> [main_generate.py](main_generate.py)
 ### [run.py](run.py) 

@@ -44,7 +44,7 @@ def decode_vae(pipe, latents, batch_size=1, verbose=True):
 
   for i in tqdm(range(0, latents.shape[0], batch_size), total=len(latents), desc='decode...'):
     decoded_latents = pipe.vae.decode(latents[i:i+batch_size].to('cuda'), return_dict=False)[0]
-    imgs[i:i+batch_size] = (pipe.image_processor.postprocess(decoded_latents, output_type='pt')*255).to(device='cpu', dtype=torch.uint8)
+    imgs[i:i+batch_size] = (pipe.image_processor.postprocess(decoded_latents, output_type='pt')*255).clip(0,255).to(device='cpu', dtype=torch.uint8)
   
   if needs_upcasting:
     pipe.vae.to(dtype=torch.float16)

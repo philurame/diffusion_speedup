@@ -1,6 +1,5 @@
 from lib.registries import scheduler_registry
 from lib.schedulers.mixin_scheduler import SchedulerMixin
-import torch
 import numpy as np
 
 @scheduler_registry.add_to_registry("KARRAS")
@@ -11,9 +10,9 @@ class KARRASScheduler(SchedulerMixin):
     sigmas = np.flip(sigmas).copy()
     sigmas = self._convert_to_karras(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
     timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]).round()
-    self.prepare_solver_data(timesteps, device)
+    self.prepare_solver_data(timesteps, device, sigmas=sigmas)
   
-  def _convert_to_karras(self, in_sigmas: torch.Tensor, num_inference_steps) -> torch.Tensor:
+  def _convert_to_karras(self, in_sigmas, num_inference_steps):
     sigma_min = in_sigmas[-1].item()
     sigma_max = in_sigmas[0].item()
     rho = 7.0  # 7.0 is the value used in the paper

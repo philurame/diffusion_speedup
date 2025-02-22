@@ -45,5 +45,3 @@ class DEIS:
 
     x_t = alpha_t * (sample / alpha_s0 + coef1 * m0 + coef2 * m1)
     return x_t
-
-    

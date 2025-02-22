@@ -27,6 +27,7 @@ for dataset, nfe, solver, scheduler, model_name in product(datasets, nfes, solve
 
   method =  f'{solver}_{scheduler}_{model_name}_{nfe}'
   approx_time = nfe if is_generate else 4
+  constr = f"[type_a|type_b|type_c{'|type_e|type_f' if is_generate else ''}]"
 
   # Build the script content
   script_content = f"""\
@@ -36,7 +37,7 @@ for dataset, nfe, solver, scheduler, model_name in product(datasets, nfes, solve
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=8
 #SBATCH --time={approx_time}:00:00
-#SBATCH --constraint="[type_a|type_b|type_c]"
+#SBATCH --constraint={constr}
 #SBATCH --output={outdir}/{method}-%j.log
 
 module load Python/Anaconda_v03.2023

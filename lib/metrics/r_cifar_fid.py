@@ -1,12 +1,11 @@
-from email import generator
 from lib.registries import metric_registry
 import os, pickle, torch, tqdm, scipy
 import numpy as np
 
-EDM_DIR = os.path.join(
+DATA_DIR = os.path.join(
   os.path.dirname(os.path.dirname(os.path.abspath(__file__))), # lib
-  'models', 'edm'
-)
+  'DATA'
+  )
 
 @metric_registry.add_to_registry('CIFAR_FID')
 class CIFAR_FID:
@@ -17,22 +16,23 @@ class CIFAR_FID:
     nfe  = kwargs['nfe']
     device = pipe.device
 
-    with open(os.path.join(EDM_DIR, 'cifar_reference.pkl'), 'rb') as f:
+    with open(os.path.join(DATA_DIR, 'cifar_reference.pkl'), 'rb') as f:
       ref = pickle.load(f)
       cifar_mu, cifar_sigma = ref['mu'], ref['sigma']
 
-    with open(os.path.join(EDM_DIR, 'InceptionV3.pkl'), 'rb') as f:
+    with open(os.path.join(DATA_DIR, 'InceptionV3.pkl'), 'rb') as f:
       detector_net = pickle.load(f).to(device)
     
     imgs_gen = torch.zeros((N,3,32,32), device='cpu', dtype=torch.uint8)
-    for i in range(0, N, 1000):
+    for i in tqdm.tqdm(range(0, N, 1000), desc='CIFAR_FID...'):
       generators = [torch.Generator(device='cpu').manual_seed(i*1000+g) for g in range(1000)]
-      imgs_gen[i:i+1000] = pipe(num_inference_steps=nfe, generator=generators)
+      outp = pipe(num_inference_steps=nfe, generator=generators)
+      imgs_gen[i:i+1000] = (outp*127.5+128).clip(0,255).to(torch.uint8)
     
     fid = self._calculate_fid(imgs_gen, cifar_mu, cifar_sigma, detector_net, device=device)
     return fid
 
-  def _calculate_fid(imgs_gen, mu_ref, sigma_ref, detector_net, device=torch.device('cuda')):
+  def _calculate_fid(self, imgs_gen, mu_ref, sigma_ref, detector_net, device=torch.device('cuda')):
     detector_kwargs = dict(return_features=True)
     feature_dim = 2048
     mu = torch.zeros([feature_dim], dtype=torch.float64, device=device)
@@ -59,4 +59,3 @@ class CIFAR_FID:
     s, _ = scipy.linalg.sqrtm(np.dot(sigma, sigma_ref), disp=False)
     fid = m + np.trace(sigma + sigma_ref - s * 2)
     return float(np.real(fid))
-

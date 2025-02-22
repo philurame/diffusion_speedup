@@ -1,5 +1,3 @@
-from DIFFUSION_SPEEDUP.lib.metrics.r_cifar_fid import DATA_DIR
-from lib.registries import model_registry
 from lib.models.edm.dnnlib.util import open_url
 import torch, os, pickle, sys
 

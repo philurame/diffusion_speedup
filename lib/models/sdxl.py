@@ -5,12 +5,14 @@ class BaseSDXL(StableDiffusionXLPipeline):
   @classmethod
   def from_pretrained(cls, *args, **kwargs):
     half = kwargs.get('half', True)
+    device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
     pipe = super().from_pretrained(
       "stabilityai/stable-diffusion-xl-base-1.0", 
       torch_dtype=torch.float16 if half else torch.float32,
       variant="fp16" if half else None,
       local_files_only=True
-    ).to('cuda' if torch.cuda.is_available() else 'cpu')
+    ).to(device)
+    if not half: pipe.text_encoder_2.to(torch.float32)
     pipe.scheduler_config = {
       "num_train_timesteps": 1000,
       "beta_start": 0.00085,
@@ -134,7 +136,6 @@ class BaseSDXL(StableDiffusionXLPipeline):
   def make_unet_solver_step(self, solver, latents, t, guidance_scale, **unet_kwargs):
     do_cfg = guidance_scale>0
     latent_model_input = torch.cat([latents] * 2) if do_cfg else latents
-    # latent_model_input = solver.scale_model_input(latent_model_input, t)
 
     noise_pred = self.unet(
       latent_model_input,
@@ -149,7 +150,7 @@ class BaseSDXL(StableDiffusionXLPipeline):
     if do_cfg:
       noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
       noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-    new_latents = solver.step(noise_pred, t, latents, return_dict=False)
+    new_latents = solver.step(noise_pred, latents, return_dict=False)
     if not isinstance(new_latents, torch.Tensor): new_latents = new_latents[0]
     return new_latents
   

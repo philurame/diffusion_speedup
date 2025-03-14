@@ -28,8 +28,6 @@ def construct_pipeline(solver, scheduler, model_name, half=True, **pipe_kwargs):
   # combine solver and scheduler
   class SolverSchedulerConstructor(SchedulerClass, SolverClass): pass
   pipe.scheduler = SolverSchedulerConstructor(config=pipe.scheduler_config)
-
-  pipe = pipe.to('cuda' if torch.cuda.is_available() else 'cpu')
   return pipe
 
 
@@ -44,8 +42,11 @@ def construct_pipeline(solver, scheduler, model_name, half=True, **pipe_kwargs):
 @click.option('--nfe', type=int, required=True, help='num inference steps')
 @click.option('--key', type=str, required=False, help='wandb key')
 @click.option('--metric_names', type=str, required=False, help='list of metrics separated by comma')
+@click.option('--device', type=int, required=False, default=-1)
+@click.option('--batch_size', type=int, required=False, default=32)
 def main(**kwargs):
-  max_samples = 10_000
+  kwargs['device'] = 'cuda' if kwargs['device'] == -1 else f"cuda:{kwargs['device']}"
+  max_samples = 30_000
   dataset = kwargs['dataset']
   nfe = kwargs['nfe']
   solver = kwargs['solver']
@@ -63,16 +64,20 @@ def main(**kwargs):
   )
   sys.stdout.flush()
 
+  if os.path.exists(save_path):
+    print(f'{save_path} already exists')
+    sys.exit(0)
+
   assert isinstance(nfe, int) and nfe > 0
 
   data = data_registry[dataset](data_path, max_samples)
-  pipe = construct_pipeline(solver, scheduler, model_name, half=True)
+  pipe = construct_pipeline(solver, scheduler, model_name, half=True, device=kwargs['device'])
 
   ########################################
   # GENERAtE
   ########################################
   os.makedirs(os.path.dirname(save_path), exist_ok=True)
-  gen_latents = generate(pipe, data.anns, nfe, save_path=save_path)
+  gen_latents = generate(pipe, data.anns, nfe, save_path=save_path, batch_size=kwargs['batch_size'])
   torch.save(gen_latents, save_path)
 
   print('__DONE')

@@ -18,7 +18,7 @@ import_dir(os.path.join(ROOT, 'lib')) # fill solver/scheduler/cacher/quantizer r
 
 def construct_pipeline(solver, scheduler, model_name, half=True, **pipe_kwargs):
   '''construct a pipeline with given model_name, solver and scheduler'''
-  
+
   # fetch pipe, solver, scheduler classes
   PipeClass   = model_registry[model_name]
   SolverClass = solver_registry[solver]
@@ -30,9 +30,8 @@ def construct_pipeline(solver, scheduler, model_name, half=True, **pipe_kwargs):
   # combine solver and scheduler
   class SolverSchedulerConstructor(SchedulerClass, SolverClass): pass
   pipe.scheduler = SolverSchedulerConstructor(config=pipe.scheduler_config)
-
-  pipe = pipe.to('cuda' if torch.cuda.is_available() else 'cpu')
   return pipe
+
 
 def calc_metrics(metric_names, **data):
   '''calculate metrics by looping over all metrics in metrics_registry'''
@@ -57,8 +56,11 @@ def calc_metrics(metric_names, **data):
 @click.option('--nfe', type=int, required=True, help='num inference steps')
 @click.option('--key', type=str, required=True, help='wandb key')
 @click.option('--metric_names', type=str, required=True, help='list of metrics separated by comma')
+@click.option('--device', type=int, default=-1)
+@click.option('--batch_size', type=int, default=8)
 def main(**kwargs):
-  max_samples = 10_000
+  kwargs['device'] = 'cuda' if kwargs['device'] == -1 else f"cuda:{kwargs['device']}"
+  max_samples = 30_000
   key = kwargs['key']
   dataset = kwargs['dataset']
   nfe = kwargs['nfe']
@@ -66,6 +68,7 @@ def main(**kwargs):
   scheduler = kwargs['scheduler'] 
   model_name = kwargs['model_name']
   metric_names = kwargs['metric_names'].split(',')
+  device = kwargs['device']
 
   data_path = os.path.join(ROOT, 'DATA')
   save_path = os.path.join(data_path, model_name, f'{dataset}_{nfe}', f'{solver}_{scheduler}.pt')
@@ -78,19 +81,27 @@ def main(**kwargs):
   )
   sys.stdout.flush()
 
+  if not os.path.exists(save_path):
+    print('path does not exist!')
+    sys.exit(0)
+  
+  wandb.login(key=key, relogin=True)
+  api = wandb.Api()
+  project_name = 'DIFFUSION_METRICS'
+  if api.runs(f"philurame/{project_name}", filters={'config.dataset': dataset, 'config.model_name': model_name, 'config.solver': solver, 'config.scheduler': scheduler, 'config.nfe': nfe}).__len__() > 0:
+    print('run already exists!')
+    sys.exit(0)
+
   data = data_registry[dataset](data_path, max_samples)
-  pipe = construct_pipeline(solver, scheduler, model_name, half=True)
+  pipe = construct_pipeline(solver, scheduler, model_name, half=True, device=device)
 
   ########################################
   # METRICS
   ########################################
 
-  if os.path.exists(save_path):
-    gen_latents = torch.load(save_path, map_location='cpu')[:max_samples]
-    gen_imgs = decode_vae(pipe, gen_latents)
-    del gen_latents
-  else:
-    gen_imgs = None
+  gen_latents = torch.load(save_path, map_location='cpu')[:max_samples]
+  gen_imgs = decode_vae(pipe, gen_latents, batch_size=kwargs['batch_size'])
+  del gen_latents
   
   gc.collect()
   torch.cuda.empty_cache()
@@ -101,7 +112,9 @@ def main(**kwargs):
     imgs_real=data.imgs, 
     anns=data.anns,
     pipe=pipe, 
-    nfe=nfe
+    nfe=nfe,
+    device=device,
+    dataset=dataset,
   )
   print(metrics)
   sys.stdout.flush()
@@ -110,9 +123,6 @@ def main(**kwargs):
   # LOG
   ########################################
 
-  # choose your wandb project
-  project_name = 'DIFFUSION_METRICS'
-  wandb.login(key=key, relogin=True)
   run = wandb.init(
     project = project_name,
     entity  = "philurame",

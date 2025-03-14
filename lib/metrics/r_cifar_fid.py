@@ -20,7 +20,7 @@ class CIFAR_FID:
       ref = pickle.load(f)
       cifar_mu, cifar_sigma = ref['mu'], ref['sigma']
 
-    with open(os.path.join(DATA_DIR, 'InceptionV3.pkl'), 'rb') as f:
+    with open(os.path.join(DATA_DIR, 'inception-2015-12-05.pkl'), 'rb') as f:
       detector_net = pickle.load(f).to(device)
     
     imgs_gen = torch.zeros((N,3,32,32), device='cpu', dtype=torch.uint8)

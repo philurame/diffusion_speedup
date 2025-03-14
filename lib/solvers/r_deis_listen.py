@@ -4,7 +4,8 @@ import torch
 @solver_registry.add_to_registry('DEIS_LISTEN')
 class DEIS_LISTEN:
   order = 2
-  def step(self, model_output, t=None, sample=None, **kwargs):
+  is_trainable = False
+  def step(self, model_output, sample=None, **kwargs):
     self.model_outputs = self.model_outputs[-1:] + [model_output]
     sample = sample.to(torch.float32)
     

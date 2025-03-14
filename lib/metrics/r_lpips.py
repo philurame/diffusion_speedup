@@ -6,15 +6,18 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 @metric_registry.add_to_registry('LPIPS')
 class LPIPS:
   def __call__(self, **kwargs):
+    dataset = kwargs['dataset']
+    if dataset != 'COCO':
+      return None
 
-    n_imgs = 10_000
-    batch_size = 250
-
-    path_ddim_200 = '/home/mdnikolaev/philurame/DIFFUSION_METRICS/DATA/imgs_ddim200_224.pt'
-    imgs_200  = torch.load(path_ddim_200, weights_only=False, map_location='cpu')[:n_imgs]
-
-    imgs_gen = kwargs['imgs_gen'][:n_imgs]
+    imgs_gen = kwargs['imgs_gen']
+    n_imgs = min(10_000, len(imgs_gen))
+    batch_size = min(250, n_imgs)
+    imgs_gen = imgs_gen[:n_imgs]
     imgs_gen_cropped = torch.nn.functional.interpolate(imgs_gen, size=(224, 224), mode='bilinear', align_corners=False)
+
+    path_ddim_200 = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/imgs_ddim200_224.pt'
+    imgs_200  = torch.load(path_ddim_200, weights_only=False, map_location='cpu')[:n_imgs]
 
     lpips_model = LearnedPerceptualImagePatchSimilarity(net_type='vgg').net.to('cpu')
     lpips_model.eval()

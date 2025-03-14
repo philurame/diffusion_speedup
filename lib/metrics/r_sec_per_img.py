@@ -9,6 +9,7 @@ class SEC_PER_IMG:
     anns = kwargs['anns']
     nfe  = kwargs['nfe']
     pipe = kwargs['pipe']
+    timesteps = kwargs.get('timesteps', None)
 
     time_total = 0
     n_counted  = 0
@@ -17,6 +18,7 @@ class SEC_PER_IMG:
       _ = pipe(
         prompt = anns[i], 
         num_inference_steps=nfe, 
+        timesteps=timesteps,
         guidance_scale=5, 
         generator = torch.Generator(device='cpu').manual_seed(i),
         return_dict=False, 

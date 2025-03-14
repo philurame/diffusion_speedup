@@ -4,7 +4,7 @@ import torch
 import torch.utils.checkpoint as cp
 
 
-@model_registry.add_to_registry('TRAIN')
+@model_registry.add_to_registry('SDXL_TRAIN')
 class TrainSDXL(BaseSDXL):
   @classmethod
   def from_pretrained(self, *args, **kwargs):
@@ -31,5 +31,19 @@ class TrainSDXL(BaseSDXL):
     if do_cfg:
       noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
       noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
-    new_latents = solver.step(noise_pred, t, latents)
+    new_latents = solver.step(noise_pred, latents)
     return new_latents
+  
+  def retrieve_timesteps(self,num_inference_steps=None, device=None, timesteps=None, **kwargs):
+    '''scheduler.set_timesetps(...)'''
+    if timesteps is not None:
+      self.scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
+      timesteps = self.scheduler.timesteps
+      num_inference_steps = len(timesteps)
+    elif num_inference_steps is not None:
+      self.scheduler.set_timesteps(num_inference_steps=num_inference_steps, device=device, **kwargs)
+      timesteps = self.scheduler.timesteps
+
+    if kwargs.get('unet_timesteps', None) is not None:
+      timesteps = kwargs['unet_timesteps']
+    return timesteps, num_inference_steps

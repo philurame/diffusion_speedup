@@ -3,15 +3,17 @@ from lib.registries import solver_registry
 @solver_registry.add_to_registry("IPNDM")
 class IPNDMBaseSolver:
   order = 4
-  def step(self, model_output, timestep=None, sample=None):
+  is_trainable = False
+  def step(self, model_output, sample=None, **kwargs):
+    if len(self.timesteps) < 20: self.order = 2
 
     self.model_outputs = self.model_outputs[-3:] + [model_output]
 
-    if self.step_index == 0:
+    if min(self.order-1, self.step_index) == 0:
       pndm_model_output = self.model_outputs[-1]
-    elif self.step_index == 1:
+    elif min(self.order-1, self.step_index) == 1:
       pndm_model_output = (3 * self.model_outputs[-1] - self.model_outputs[-2]) / 2
-    elif self.step_index == 2:
+    elif min(self.order-1, self.step_index) == 2:
       pndm_model_output = (23 * self.model_outputs[-1] - 16 * self.model_outputs[-2] + 5 * self.model_outputs[-3]) / 12
     else:
       pndm_model_output = (1 / 24) * (55 * self.model_outputs[-1] - 59 * self.model_outputs[-2] + 37 * self.model_outputs[-3] - 9 * self.model_outputs[-4])

@@ -9,9 +9,10 @@ class IS:
   def __call__(self, **kwargs):
     batch_size = kwargs.get('batch_size', 512)
     imgs_gen = kwargs['imgs_gen']
+    device = kwargs['device']
 
-    is_model = InceptionScore(normalize=False).to('cuda')
+    is_model = InceptionScore(normalize=False).to(device)
     for i in tqdm.tqdm(range(0, imgs_gen.shape[0], batch_size), desc='IS...'):
-      is_model.update(imgs_gen[i:i+batch_size].to('cuda'))
+      is_model.update(imgs_gen[i:i+batch_size].to(device))
 
     return is_model.compute()[0].item()

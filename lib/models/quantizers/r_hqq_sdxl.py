@@ -8,14 +8,15 @@ from hqq.core.quantize import BaseQuantizeConfig, HQQLinear
 @model_registry.add_to_registry("HQQ")
 class HQQ4(BaseSDXL):
   @classmethod
-  def from_pretrained(cls, **kwargs):
+  def from_pretrained(cls, *args, **kwargs):
+    device = kwargs.get('device', 'cuda')
     nbits = kwargs.get('nbits', 4)
-    pipe = super().from_pretrained()
-    q_unet(pipe, nbits=nbits)
+    pipe = super().from_pretrained(*args, **kwargs)
+    q_unet(pipe, nbits=nbits, device=device)
     return pipe
 
   
-def q_unet(pipe, nbits):
+def q_unet(pipe, nbits, device):
   all_layers = get_linear_and_conv_layers(pipe)
   quant_config = BaseQuantizeConfig(nbits=nbits, group_size=64)
 
@@ -26,7 +27,7 @@ def q_unet(pipe, nbits):
       layer, #torch.nn.Linear or None 
       quant_config=quant_config, #quantization configuration
       compute_dtype=torch.float16, #compute dtype
-      device='cuda', #cuda device
+      device=device, #cuda device
       initialize=True, #Use False to quantize later
       del_orig=True #if True, delete the original layer
     )

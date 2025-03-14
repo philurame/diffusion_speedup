@@ -10,8 +10,9 @@ class CLIPMetric:
     batch_size = kwargs.get('batch_size', 512)
     anns = kwargs['anns']
     imgs_gen = kwargs['imgs_gen']
+    device = kwargs['device']
 
-    clip_model = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32").to('cuda')
+    clip_model = CLIPScore(model_name_or_path="openai/clip-vit-base-patch32").to(device)
     for i in tqdm.tqdm(range(0, imgs_gen.shape[0], batch_size), desc='CLIP...'):
-      clip_model.update(imgs_gen[i:i+batch_size].to('cuda'), anns[i:i+batch_size])
+      clip_model.update(imgs_gen[i:i+batch_size].to(device), anns[i:i+batch_size])
     return clip_model.compute().item()

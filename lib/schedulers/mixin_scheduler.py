@@ -39,6 +39,7 @@ class SchedulerMixin:
     else:
       # set noise schedule according to timesteps
       sigmas = ((1 - self.alphas_cumprod) / self.alphas_cumprod).sqrt()
+      timesteps = timesteps.to(sigmas.device)
       N = sigmas.shape[0]
 
       idx_lower = timesteps.floor().long() # lower index

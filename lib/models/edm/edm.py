@@ -14,8 +14,9 @@ class EDM:
       "beta_end": 0.02,
       "beta_schedule": "linear",
     }
-    self.device = kwargs.get('device', 'cuda')
     self.is_train = kwargs.get('is_train', False)
+    self.to(kwargs.get('device', 'cuda'))
+
 
   @classmethod
   def from_pretrained(cls, *args, **kwargs):
@@ -33,14 +34,14 @@ class EDM:
     num_inference_steps=None,
     timesteps=None,
     generator=torch.Generator(),
-    init_noise=None,
+    latents=None,
     **kwargs
     ):  
 
     device = self.device
 
     # initialize x_T batch
-    image = init_noise or self._initialize_batch(generator)
+    image = latents if latents is not None else self._initialize_batch(generator)
 
     self.scheduler.set_timesteps(num_inference_steps=num_inference_steps, timesteps=timesteps)
 
@@ -57,7 +58,7 @@ class EDM:
 
     # convert to eps
     model_output = (image - x_0 * alpha_t) / (alpha_t * sigma_t)
-    image = solver.step(model_output, t, image)    
+    image = solver.step(model_output, image)    
     return image
   
   def to(self, device):
@@ -68,7 +69,7 @@ class EDM:
   def _initialize_batch(self, generator):
     if isinstance(generator, torch.Generator):
       generator = [generator]
-    tensor_list = [torch.randn(3, 32, 32, generator=gen) for gen in generator]
+    tensor_list = [torch.randn(3, 32, 32, generator=gen, dtype=torch.float32) for gen in generator]
     return torch.stack(tensor_list, dim=0).to(self.device)
   
   def _load_edm_net(self, local_path=None):

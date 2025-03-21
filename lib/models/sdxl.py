@@ -10,7 +10,7 @@ class BaseSDXL(StableDiffusionXLPipeline):
       "stabilityai/stable-diffusion-xl-base-1.0", 
       torch_dtype=torch.float16 if half else torch.float32,
       variant="fp16" if half else None,
-      local_files_only=True
+      local_files_only=False # use True for HSE cluster
     ).to(device)
     if not half: pipe.text_encoder_2.to(torch.float32)
     pipe.scheduler_config = {

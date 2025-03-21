@@ -1,28 +1,37 @@
 # PROJECT STRUCTURE
-- `pip install -r requirements.txt`
-- Launch via `python run.py --generate X --wandb_key Y` based on config [config_generate.yaml](config_generate.yaml) (or [config_metric.yaml](config_metric.yaml)), `generate` boolean X and `wandb_key` str Y
-- Usage examples in `notebooks`
+- setup enviroment
+```
+conda create -n diffusion_speedup python=3.9
+conda activate diffusion_speedup
+pip install -r requirements.txt
+```
+- change parameters in [gen_metric.sh](gen_metric.sh) (dataset and LPIPS data will be loaded automatically if missing) and run metric calculation as follows:
+```
+conda activate diffusion_speedup
+cd DIFFUSION_SPEEDUP
+chomd +x gen_metric.sh
+./gen_metric.sh
+```
 
 ## `COCO2017 & PARTI dataset`
-- can be downloaded in [this kaggle dataset](https://www.kaggle.com/datasets/philurame/coco2017-and-parti)
-- after downloading put it in the `DATA/datasets_coco_parti.pkl` path
+- Datasets are constructed as in [this kaggle notebook](https://www.kaggle.com/code/philurame/downloading-cifar10-imagenet-mscoco-datasets) and available by [this link](https://drive.google.com/file/d/1gOvJpJXUb-27aH24aNjzgCSrX37s83jc/view?usp=drive_link)
+- [gen_metric.sh](gen_metric.sh) downloads these datasets automatically
 
 ## `EDM` (and CIFAR metrics)
-- download [inceptionV3](https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl) and put it the `DATA/InceptionV3.pkl` path
-- download [EDM model](https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl) and put it the `DATA/edm-cifar10-32x32-uncond-vp.pkl` path
+- to use EDM model for FID calculation on CIFAR, you need [inceptionV3 model](https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl), put it the `DATA/InceptionV3.pkl` path
+- also download [EDM model](https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-uncond-vp.pkl) itself and put it the `DATA/edm-cifar10-32x32-uncond-vp.pkl` path
 
-## [run.py](run.py), [config_generate.yaml](config_generate.yaml) -> [main_generate.py](main_generate.py)
-### [run.py](run.py) 
-- takes product of all compbinations from [config_generate.yaml](config_generate.yaml) (or [config_metric.yaml](config_metric.yaml)) and executes [main_generate.py](main_generate.py) (or [main_metric.py](main_metric.py)) with sbatch
-- requires `wandb_key` and `generate` parameters
+## [run_devices](run/run_devices.py) and [run_sbatch](run/run_sbatch.py)
+- use `run_devices` using multiple cuda scheduling generation/metric calculation and use `run_sbatch` if you are using HSE cluster.
+- these scripts take product of all compbinations from [config_generate](run/config_generate.yaml) (or [config_metric](run/config_metric.yaml)) and executes [main_generate](run/main_generate.py) (or [main_metric](run/main_metric.py)) with sbatch
 
-### [config_generate.yaml](config_generate.yaml) ([config_metric.yaml](config_metric.yaml))
+### [config_generate](run/config_generate.yaml) ([config_metric](run/config_metric.yaml))
 - Configuration file for solvers, schedulers, cachers/quantizers
 
-### [main_generate.py](main_generate.py)
+### [main_generate.py](run/main_generate.py)
 - generates latent images for `SDXL` and stores in [DATA/...](DATA)
 
-### [main_metric.py](main_metric.py)
+### [main_metric.py](run/main_metric.py)
 - calculates metrics for stored latents and logs them into `wandb`
 
 ## [solvers](lib/solvers)

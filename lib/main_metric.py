@@ -1,7 +1,7 @@
 import wandb, click
 import torch, os, sys, gc
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # DIFFUSION_SPEEDUP
 if ROOT not in sys.path:
   sys.path.insert(0, ROOT)
 
@@ -54,14 +54,15 @@ def calc_metrics(metric_names, **data):
 @click.option('--solver', type=str, required=True, help='supported methods are in lib/solvers')
 @click.option('--scheduler', type=str, required=True, help='supported methods are in lib/schedulers')
 @click.option('--nfe', type=int, required=True, help='num inference steps')
-@click.option('--key', type=str, required=True, help='wandb key')
 @click.option('--metric_names', type=str, required=True, help='list of metrics separated by comma')
+@click.option('--key', type=str, default=None)
+@click.option('--wandb_project_name', type=str, default='DIFFUSION_METRICS')
+@click.option('--max_samples', type=int, default=10_000)
+@click.option('--batch_size', type=int, default=16)
 @click.option('--device', type=int, default=-1)
-@click.option('--batch_size', type=int, default=8)
 def main(**kwargs):
   kwargs['device'] = 'cuda' if kwargs['device'] == -1 else f"cuda:{kwargs['device']}"
-  max_samples = 30_000
-  key = kwargs['key']
+
   dataset = kwargs['dataset']
   nfe = kwargs['nfe']
   solver = kwargs['solver']
@@ -69,9 +70,14 @@ def main(**kwargs):
   model_name = kwargs['model_name']
   metric_names = kwargs['metric_names'].split(',')
   device = kwargs['device']
-
+  key = kwargs['key']
+  project_name = kwargs['wandb_project_name']
+  max_samples = kwargs['max_samples']
+  batch_size = kwargs['batch_size']
+  
   data_path = os.path.join(ROOT, 'DATA')
   save_path = os.path.join(data_path, model_name, f'{dataset}_{nfe}', f'{solver}_{scheduler}.pt')
+  path_ddim_200 = os.path.join(data_path, 'imgs_ddim200_224.pt')
 
   print(
     '\n'+'#'*50, 
@@ -85,12 +91,11 @@ def main(**kwargs):
     print('path does not exist!')
     sys.exit(0)
   
-  wandb.login(key=key, relogin=True)
-  api = wandb.Api()
-  project_name = 'DIFFUSION_METRICS'
-  if api.runs(f"philurame/{project_name}", filters={'config.dataset': dataset, 'config.model_name': model_name, 'config.solver': solver, 'config.scheduler': scheduler, 'config.nfe': nfe}).__len__() > 0:
-    print('run already exists!')
-    sys.exit(0)
+  # wandb.login(key=key, relogin=True)
+  # api = wandb.Api()
+  # if api.runs(f"philurame/{kwargs['wandb_project_name']}", filters={'config.dataset': dataset, 'config.model_name': model_name, 'config.solver': solver, 'config.scheduler': scheduler, 'config.nfe': nfe}).__len__() > 0:
+  #   print('run already exists!')
+  #   sys.exit(0)
 
   data = data_registry[dataset](data_path, max_samples)
   pipe = construct_pipeline(solver, scheduler, model_name, half=True, device=device)
@@ -100,7 +105,7 @@ def main(**kwargs):
   ########################################
 
   gen_latents = torch.load(save_path, map_location='cpu')[:max_samples]
-  gen_imgs = decode_vae(pipe, gen_latents, batch_size=kwargs['batch_size'])
+  gen_imgs = decode_vae(pipe, gen_latents, batch_size=batch_size)
   del gen_latents
   
   gc.collect()
@@ -115,6 +120,7 @@ def main(**kwargs):
     nfe=nfe,
     device=device,
     dataset=dataset,
+    path_ddim_200=path_ddim_200
   )
   print(metrics)
   sys.stdout.flush()
@@ -122,23 +128,22 @@ def main(**kwargs):
   ########################################
   # LOG
   ########################################
-
-  run = wandb.init(
-    project = project_name,
-    entity  = "philurame",
-    name = f'{dataset}_{model_name}_{solver}_{scheduler}_{nfe}',
-    config = kwargs,
-    save_code = True,
-    mode='offline'
-  )
-
-  wandb.log(metrics)
-  wandb.finish()
-
-  # try to sync with wandb online:
-  run_path = [x for x in os.listdir('wandb') if run.id in x][0]
-  run_path = os.path.join('wandb', run_path)
-  os.system(f'wandb sync {run_path}')
+  if key is not None:
+    wandb.login(key=key, relogin=True)
+    run = wandb.init(
+      project = project_name,
+      entity  = "philurame",
+      name = f'{dataset}_{model_name}_{solver}_{scheduler}_{nfe}',
+      config = kwargs,
+      save_code = True,
+      mode='online'
+    )
+    wandb.log(metrics)
+    wandb.finish()
+    # # try to sync with wandb online:
+    # run_path = [x for x in os.listdir('wandb') if run.id in x][0]
+    # run_path = os.path.join('wandb', run_path)
+    # os.system(f'wandb sync {run_path}')
 
   print('__DONE')
   sys.stdout.flush()

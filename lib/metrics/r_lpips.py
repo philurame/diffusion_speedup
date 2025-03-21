@@ -16,7 +16,7 @@ class LPIPS:
     imgs_gen = imgs_gen[:n_imgs]
     imgs_gen_cropped = torch.nn.functional.interpolate(imgs_gen, size=(224, 224), mode='bilinear', align_corners=False)
 
-    path_ddim_200 = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/imgs_ddim200_224.pt'
+    path_ddim_200 = kwargs['path_ddim_200']
     imgs_200  = torch.load(path_ddim_200, weights_only=False, map_location='cpu')[:n_imgs]
 
     lpips_model = LearnedPerceptualImagePatchSimilarity(net_type='vgg').net.to('cpu')

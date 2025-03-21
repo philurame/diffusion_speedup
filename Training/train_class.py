@@ -1,9 +1,9 @@
 from train_utils import *
+from train_utils import _get_ays_timesteps_ts
 
 import torch, wandb, tqdm, torch.optim as optim, pickle
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-import io
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -17,28 +17,26 @@ class Trainer:
 
     self.config = config
     self.lpips_model = LearnedPerceptualImagePatchSimilarity(net_type='vgg').net.to(config.device)
-    
-    with open(config.p_train_prompts, 'rb') as f:
-      self.train_prompts = pickle.load(f)
-    self.train_latents = torch.load(config.p_train_latents, weights_only=True)[:config.train_size].to(torch.float32)
-    self.train_teacher_imgs  = torch.load(config.p_teacher_imgs, weights_only=True)[:config.train_size].to(torch.float32)
+
+    with open(config.p_dataset, 'rb') as f:
+      dataset = pickle.load(f)
+    self.train_prompts = dataset['train']['prompts']
+    self.train_latents = dataset['train']['latents']
+    self.train_teacher_imgs = dataset['train']['imgs']
+    self.val_prompts = dataset['val']['prompts']
+    self.val_latents = dataset['val']['latents']
+    self.val_teacher_imgs = dataset['val']['imgs']
+
     self.train_teacher_imgs_224 = torch.nn.functional.interpolate(self.train_teacher_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
     self.train_teacher_features = get_features(self.train_teacher_imgs_224, self.lpips_model)
-
-    with open(config.p_val_dataset, 'rb') as f:
-      val_dataset = pickle.load(f)[:config.val_size]
-    self.val_prompts = [i[0] for i in val_dataset]
-    self.val_latents = torch.stack([i[1] for i in val_dataset]).to(torch.float32)
-    self.val_teacher_imgs = torch.stack([i[2] for i in val_dataset]).to(torch.float32)
     self.val_teacher_imgs_224 = torch.nn.functional.interpolate(self.val_teacher_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
     self.val_teacher_features = get_features(self.val_teacher_imgs_224, self.lpips_model)
-
-    self.ts_param = TSParam(config.ts_param_method)
 
     self.pipe = construct_pipeline(config.solver, 'CUSTOM', config.model, is_train=True, device=config.device)
     for param in self.pipe.unet.parameters():
       param.requires_grad = False
 
+    self.ts_param = TSParam(config.ts_param_method)
     self._init_timestemps()
     
     train_params = []
@@ -52,11 +50,12 @@ class Trainer:
       train_params.append({"params": self.uts_logits, "lr": config.lr_uts})
     
     if self.pipe.scheduler.is_trainable:
-      self.pipe.scheduler.set_train_solver(self.config.nfe)
+      self.pipe.scheduler.set_train_solver(self.config.nfe, device=config.device)
       train_params.append({"params": self.pipe.scheduler.train_params, "lr": config.lr_solv})
 
     self.optimizer = optim.Adam(train_params)
-    self.global_step = 0
+    self.global_step = 0      
+
   
   def _init_timestemps(self):
     ts_linear = torch.linspace(0, 999, self.config.nfe + 1).round().flip(0)[:-1]
@@ -64,6 +63,10 @@ class Trainer:
       self.ts_logits = self.ts_param.get_logits(ts_linear.float())
     elif self.config.ts_start_method == 'bad':
       ts_linear[1::2] = ts_linear[:-1:2] - 10
+      self.ts_logits = self.ts_param.get_logits(ts_linear.float())
+    elif self.config.ts_start_method == 'ays':
+      ts_numpy = _get_ays_timesteps_ts(self.config.nfe)
+      ts_linear = torch.tensor(ts_numpy)
       self.ts_logits = self.ts_param.get_logits(ts_linear.float())
     else:
       raise NotImplementedError
@@ -84,9 +87,10 @@ class Trainer:
 
     # main loop
     for epoch in tqdm.tqdm(range(self.config.epochs)):
+      self.epoch = epoch
       train_loss, train_imgs_log = self.train_epoch()
       val_losses, val_imgs_log = self.validate_epoch()
-      self.log_epoch(train_loss, val_losses, train_imgs_log, val_imgs_log, epoch)
+      self.log_epoch(train_loss, val_losses, train_imgs_log, val_imgs_log)
 
       if self.early_stop(train_loss, val_losses):
         print('Early stopping at epoch', epoch)
@@ -149,9 +153,6 @@ class Trainer:
       batch_loss = batch_loss / effective_batch_size
       log_dict = {f'train/batch_{self.config.loss}' : batch_loss}
       self.log_clip_grad_step(log_dict)
-
-      if self.config.log_debug:
-        self.log_difference_heatmaps(gen_imgs[0], start_idx)
     
     train_loss = train_loss / self.config.train_size
     return train_loss, train_imgs_log[:n_imgs_log]
@@ -165,55 +166,70 @@ class Trainer:
 
 
   def get_train_loss(self, gen_imgs, start_idx, end_idx):
-    if self.config.loss == 'l2':
-      raw_loss = F.mse_loss(gen_imgs, self.train_teacher_imgs[start_idx:end_idx].to(self.config.device), reduction='none')
-      raw_loss = raw_loss.mean(dim=list(range(1,len(raw_loss.shape)))).sum()
-
-    if self.config.loss == 'l2_224':
-      imgs_interp = torch.nn.functional.interpolate(gen_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
-      raw_loss = F.mse_loss(imgs_interp, self.train_teacher_imgs_224[start_idx:end_idx].to(self.config.device), reduction='none')
-      raw_loss = raw_loss.mean(dim=list(range(1,len(raw_loss.shape)))).sum()
-
-    elif self.config.loss == 'lpips':
+    if self.config.loss == 'lpips':
       imgs_interp = torch.nn.functional.interpolate(gen_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
       gen_features = get_features(imgs_interp, self.lpips_model)
       teacher_features = tuple(i[start_idx:end_idx] for i in self.train_teacher_features)
       raw_loss = get_lpips(teacher_features, gen_features, self.lpips_model, reduction='sum')
+      return raw_loss
+
+    if self.config.loss == 'l2lpips':
+      imgs_interp = torch.nn.functional.interpolate(gen_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
+      gen_features = get_features(imgs_interp, self.lpips_model)
+      teacher_features = tuple(i[start_idx:end_idx] for i in self.train_teacher_features)
+      lpips_loss = get_lpips(teacher_features, gen_features, self.lpips_model, reduction='sum')
+      l2_loss = F.mse_loss(gen_imgs, self.train_teacher_imgs[start_idx:end_idx].to(self.config.device), reduction='none')
+      l2_loss = l2_loss.mean(dim=list(range(1,len(l2_loss.shape)))).sum()
+      return lpips_loss + l2_loss * 5
+
+    if self.config.loss.startswith('l2_'):
+      resolution = int(self.config.loss.split('_')[-1])
+      student_imgs = torch.nn.functional.interpolate(gen_imgs, size=(resolution, resolution), mode='bilinear', align_corners=False).squeeze()
+      teacher_imgs = torch.nn.functional.interpolate(self.train_teacher_imgs[start_idx:end_idx], size=(resolution, resolution), mode='bilinear', align_corners=False).squeeze()
+    elif self.config.loss.startswith('crop_'):
+      resolution = int(self.config.loss.split('_')[-1])
+      student_imgs = gen_imgs[:, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+      teacher_imgs = self.train_teacher_imgs[start_idx:end_idx, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+    elif self.config.loss == 'l2':
+      student_imgs = gen_imgs
+      teacher_imgs = self.train_teacher_imgs[start_idx:end_idx]
+    
+    raw_loss = F.mse_loss(student_imgs, teacher_imgs.to(self.config.device), reduction='none')
+    raw_loss = raw_loss.mean(dim=list(range(1,len(raw_loss.shape)))).sum()
     return raw_loss
-  
+    
 
   def log_clip_grad_step(self, log_dict):
     params_to_clip = []
     if self.config.train_timesteps:
       params_to_clip.append(self.ts_logits)
-      log_dict['grad/ts_grad_norm'] = self.ts_logits.grad.norm(2).item()
-      log_dict['grad/ts_grad_mean'] = self.ts_logits.grad.mean().item()
-      log_dict['grad/ts_grad_90%']  = self.ts_logits.grad.abs().quantile(0.9).item()
-      log_dict['grad/ts_grad_std']  = self.ts_logits.grad.std().item() 
-      if self.config.log_debug:
-        for n, p in enumerate(self.ts_logits):
-          log_dict.update({f'grad_debug/t[{n}]': pi.item() for i, pi in enumerate(p.grad)})
+      log_dict['grad_general/ts_grad_norm'] = self.ts_logits.grad.norm(2).item()
+      log_dict['grad_general/ts_grad_mean'] = self.ts_logits.grad.mean().item()
+      log_dict['grad_general/ts_grad_90%']  = self.ts_logits.grad.abs().quantile(0.9).item()
+      log_dict['grad_general/ts_grad_std']  = self.ts_logits.grad.std().item() 
     
     if self.config.train_timesteps_unet:
       params_to_clip.append(self.uts_logits)
-      log_dict['grad/unet_ts_grad_norm'] = self.uts_logits.grad.norm(2).item()
-      log_dict['grad/unet_ts_grad_mean'] = self.uts_logits.grad.mean().item()
-      log_dict['grad/unet_ts_grad_90%']  = self.uts_logits.grad.abs().quantile(0.9).item()
-      log_dict['grad/unet_ts_grad_std']  = self.uts_logits.grad.std().item()
-      if self.config.log_debug:
-        for n, p in enumerate(self.uts_logits):
-          log_dict.update({f'grad_debug/unet_t[{n}]': pi.item() for i, pi in enumerate(p.grad)})
+      log_dict['grad_general/unet_ts_grad_norm'] = self.uts_logits.grad.norm(2).item()
+      log_dict['grad_general/unet_ts_grad_mean'] = self.uts_logits.grad.mean().item()
+      log_dict['grad_general/unet_ts_grad_90%']  = self.uts_logits.grad.abs().quantile(0.9).item()
+      log_dict['grad_general/unet_ts_grad_std']  = self.uts_logits.grad.std().item()
         
     if self.pipe.scheduler.is_trainable:
-      params_to_clip.append(self.pipe.scheduler.train_params)
-      log_dict['grad/solv_grad_norm'] = self.pipe.scheduler.train_params.grad.norm(2).item()
-      log_dict['grad/solv_grad_mean'] = self.pipe.scheduler.train_params.grad.mean().item()
-      log_dict['grad/solv_grad_90%']  = self.pipe.scheduler.train_params.grad.abs().quantile(0.9).item()
-      log_dict['grad/solv_grad_std']  = self.pipe.scheduler.train_params.std().item() 
-      if self.config.log_debug:
-        for n, p in enumerate(self.pipe.scheduler.train_params):
-          log_dict.update({f'grad_debug/nfe[{n}]_p[{i}]': pi.item() for i, pi in enumerate(p.grad)})
-      
+      if isinstance(self.pipe.scheduler.train_params, torch.Tensor):
+        params_to_clip.append(self.pipe.scheduler.train_params)
+        log_dict['grad_general/solv_norm'] = self.pipe.scheduler.train_params.grad.norm(2).item()
+        log_dict['grad_general/solv_mean'] = self.pipe.scheduler.train_params.grad.mean().item()
+        log_dict['grad_general/solv_90%']  = self.pipe.scheduler.train_params.grad.abs().quantile(0.9).item()
+        log_dict['grad_general/solv_std']  = self.pipe.scheduler.train_params.grad.std().item() 
+
+        for n, p in enumerate(self.pipe.scheduler.train_params.grad):
+          log_dict.update({f'solv/grad_mean_nfe[{n}]': p.mean().item()})
+          log_dict.update({f'solv/grad_norm_nfe[{n}]': p.norm(2).item()})
+          log_dict.update({f'solv/grad_std_nfe[{n}]': p.std().item()})
+      else: # it is generator:
+        params_to_clip.extend(list(self.pipe.scheduler.train_params))
+        
     self.global_step += 1
     wandb.log(log_dict, step=self.global_step)
       
@@ -261,14 +277,25 @@ class Trainer:
 
   def get_val_loss(self, gen_imgs, start_idx, end_idx):
     losses = {}
-    imgs_interp = torch.nn.functional.interpolate(gen_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
 
     losses['l2'] = F.mse_loss(gen_imgs, self.val_teacher_imgs[start_idx:end_idx].to(self.config.device), reduction='none')
     losses['l2'] = losses['l2'].mean(dim=list(range(1,len(losses['l2'].shape)))).sum()
 
-    losses['l2_224'] = F.mse_loss(imgs_interp, self.val_teacher_imgs_224[start_idx:end_idx].to(self.config.device), reduction='none')
-    losses['l2_224'] = losses['l2_224'].mean(dim=list(range(1,len(losses['l2_224'].shape)))).sum()
+    if self.config.loss.startswith('l2_'):
+      resolution = int(self.config.loss.split('_')[-1])
+      student_interp = torch.nn.functional.interpolate(gen_imgs, size=(resolution, resolution), mode='bilinear', align_corners=False).squeeze()
+      teacher_interp = torch.nn.functional.interpolate(self.train_teacher_imgs[start_idx:end_idx], size=(resolution, resolution), mode='bilinear', align_corners=False).squeeze()
+      losses[self.config.loss] = F.mse_loss(student_interp, teacher_interp.to(self.config.device), reduction='none')
+      losses[self.config.loss] = losses[self.config.loss].mean(dim=list(range(1,len(losses[self.config.loss].shape)))).sum()
+    
+    if self.config.loss.startswith('crop_'):
+      resolution = int(self.config.loss.split('_')[-1])
+      student_crop = gen_imgs[:, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+      teacher_crop = self.val_teacher_imgs[start_idx:end_idx, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+      losses[self.config.loss] = F.mse_loss(student_crop, teacher_crop.to(self.config.device), reduction='none')
+      losses[self.config.loss] = losses[self.config.loss].mean(dim=list(range(1,len(losses[self.config.loss].shape)))).sum()
 
+    imgs_interp = torch.nn.functional.interpolate(gen_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
     gen_features = get_features(imgs_interp, self.lpips_model)
     teacher_features = tuple(i[start_idx:end_idx] for i in self.val_teacher_features)
     losses['lpips'] = get_lpips(teacher_features, gen_features, self.lpips_model, reduction='sum')
@@ -280,8 +307,8 @@ class Trainer:
   # ==================================================================================================================
   # LOG
   # ==================================================================================================================
-  def log_epoch(self, train_loss, val_losses, train_imgs_log, val_imgs_log, epoch):
-    log_dict = {'epoch': epoch}
+  def log_epoch(self, train_loss, val_losses, train_imgs_log, val_imgs_log):
+    log_dict = {'epoch': self.epoch}
     log_dict[f"train/{self.config.loss}"] = train_loss
     log_dict.update({f"val/{k}": v for k, v in val_losses.items()})
 
@@ -291,50 +318,110 @@ class Trainer:
     if self.config.train_timesteps_unet:
       log_dict.update({f'unet_timesteps/t[{n}]': t.item() for n, t in enumerate(self.unet_timesteps)})
     
-    if self.pipe.scheduler.is_trainable: # shape is (nfe x N)
+    if self.pipe.scheduler.is_trainable and isinstance(self.pipe.scheduler.train_params, torch.Tensor):
       for n, p in enumerate(self.pipe.scheduler.train_params):
-        log_dict.update({f'solv_params/nfe[{n}]_p[{i}]': pi.item() for i, pi in enumerate(p)})
+        log_dict.update({f'solv/param_mean_nfe[{n}]': p.mean().item()})
+        log_dict.update({f'solv/param_std_nfe[{n}]': p.std().item()})
+        log_dict.update({f'solv/param_norm_nfe[{n}]': p.norm(2).item()})
 
     wandb.log(log_dict, step=self.global_step)
 
-    if (self.global_step-1) % self.config.img_log_interval == 0:
+    if self.epoch % self.config.img_log_interval == 0:
       train_imgs_log = torch.stack(train_imgs_log, dim=0)
       val_imgs_log   = torch.stack(val_imgs_log, dim=0)
-      train_imgs_log = torch.nn.functional.interpolate(train_imgs_log, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
-      val_imgs_log   = torch.nn.functional.interpolate(val_imgs_log,   size=(224, 224), mode='bilinear', align_corners=False).squeeze()
+      if train_imgs_log.shape[-1] > 224:
+        train_imgs_log = torch.nn.functional.interpolate(train_imgs_log, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
+        val_imgs_log   = torch.nn.functional.interpolate(val_imgs_log,   size=(224, 224), mode='bilinear', align_corners=False).squeeze()
+        train_imgs_teacher = self.train_teacher_imgs_224[:len(train_imgs_log)]
+        val_imgs_teacher   = self.val_teacher_imgs_224[:len(val_imgs_log)]
+      else:
+        train_imgs_teacher = self.train_teacher_imgs[:len(train_imgs_log)]
+        val_imgs_teacher   = self.val_teacher_imgs[:len(val_imgs_log)]
+
       wandb_log_imgs(
         imgs_student=train_imgs_log, 
-        imgs_teacher=self.train_teacher_imgs_224[:len(train_imgs_log)], 
+        imgs_teacher=train_imgs_teacher, 
         key="train",
         global_step=self.global_step,
         )
       wandb_log_imgs(
         imgs_student=val_imgs_log, 
-        imgs_teacher=self.val_teacher_imgs_224[:len(val_imgs_log)], 
+        imgs_teacher=val_imgs_teacher, 
         key="val",
         global_step=self.global_step,
         )
+      
+      # idx = 0 if train_imgs_log.shape[-1] < 224 else 1
+      # self.log_difference_heatmaps(train_imgs_log[idx:idx+1], train_imgs_teacher[idx:idx+1])
+      # if self.config.log_jacobian:
+      #   self.log_saliency_heatmap(idx, interp_n=16)
+
   
-  
+
   @torch.inference_mode()
-  def log_difference_heatmaps(self, gen_img, teacher_idx):
-    gen_img = torch.nn.functional.interpolate(gen_img, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
-    diff = (gen_img - self.train_teacher_imgs_224[teacher_idx].to(self.config.device)).abs()
-    if diff.ndim == 3: diff = diff.mean(0)
+  def log_difference_heatmaps(self, student_img, teacher_img):
+    if self.config.loss.startswith('l2') and student_img.shape[-1] > 224:
+      resolution = 224 if self.config.loss == 'l2' else int(self.config.loss.split('_')[-1])
+      student_img = torch.nn.functional.interpolate(student_img, size=(resolution, resolution), mode='bilinear', align_corners=False).squeeze()
+      teacher_img = torch.nn.functional.interpolate(teacher_img, size=(resolution, resolution), mode='bilinear', align_corners=False).squeeze()
+    
+    if self.config.loss.startswith('crop_'):
+      resolution = int(self.config.loss.split('_')[-1])
+      student_img = student_img[:, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+      teacher_img = teacher_img[:, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+
+    diff = (student_img.to(self.config.device) - teacher_img.to(self.config.device)).squeeze().abs().mean(0)
     diff_np = diff.cpu().numpy()
 
-    plt.figure(figsize=(4,3))
-    sns.heatmap(diff_np, cmap='magma')
-    plt.title("Absolute Difference")
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png')
-    buf.seek(0)
-    wandb.log({f"heatmaps/difference_heatmap": wandb.Image(buf, caption="Absolute Difference Heatmap")}, step=self.global_step)
-    plt.close()
+    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+    sns.heatmap(diff_np, cmap='magma', ax=ax)
+    ax.set_title("Absolute Difference")
+    ax.set_axis_off()
+    wandb.log({f"heatmaps/l1": wandb.Image(fig)}, step=self.global_step)
+    plt.close('all')
 
-  def log_saliency_heatmap(**kwargs):
-    """
-    TODO: calculates Jacobian of the gen_img with respect to the input solver parameters
-    """
-    pass
+  def log_saliency_heatmap(self, idx=0, interp_n=16):
+    if self.config.loss.startswith('crop_'):
+      resolution = int(self.config.loss.split('_')[-1])
+    else:
+      resolution = None
 
+
+    orig_data = self.pipe.scheduler.train_params.data.clone()
+    grads = torch.zeros((interp_n, interp_n, *self.pipe.scheduler.train_params.shape))
+
+    for i in range(interp_n):
+      for j in range(interp_n):
+        self.pipe.scheduler.train_params.data.copy_(orig_data)
+        self.pipe.scheduler.train_params.requires_grad_(True)
+        self.optimizer.zero_grad(set_to_none=True)
+
+        student_img = self.pipe(prompt=self.train_prompts[idx:idx+1], timesteps=self.timesteps, unet_timesteps=self.unet_timesteps, latents=self.train_latents[idx:idx+1].to(self.config.device), output_type='pt')
+        teacher_img = self.train_teacher_imgs[idx:idx+1]
+
+        if resolution is not None:
+          student_img = student_img[:, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+          teacher_img = teacher_img[:, :, resolution//2:-resolution//2, resolution//2:-resolution//2]
+
+        student_img = torch.nn.functional.interpolate(student_img, size=(interp_n, interp_n), mode='bilinear', align_corners=False).squeeze()
+        teacher_img = torch.nn.functional.interpolate(teacher_img, size=(interp_n, interp_n), mode='bilinear', align_corners=False).squeeze()
+        target_pixel = (student_img[:, i, j] - teacher_img[:, i, j].to(self.pipe.device)).abs().mean()
+        target_pixel.backward()
+
+        grads[i,j] = self.pipe.scheduler.train_params.grad.detach().clone()
+
+    self.optimizer.zero_grad(set_to_none=True)
+    with torch.no_grad():
+      self.pipe.scheduler.train_params.data.copy_(orig_data)
+    
+
+    nfes, nparams = self.pipe.scheduler.train_params.shape
+    fig, ax = plt.subplots(nfes, nparams, figsize=(5*nparams, 4*nfes))
+    for n in range(nfes):
+      for p in range(nparams):
+        axi = ax[n, p]
+        sns.heatmap(grads[:,:,n,p].detach().cpu().numpy(), cmap='magma', ax=axi)
+        axi.set_title(f"nfe[{n}] param[{p}]")
+
+    wandb.log({f"heatmaps/saliency": wandb.Image(fig)}, step=self.global_step)
+    plt.close('all')

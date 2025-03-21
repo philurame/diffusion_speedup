@@ -10,12 +10,14 @@ class TFLOPS:
     anns = kwargs['anns']
     pipe = kwargs['pipe']
     nfe  = kwargs['nfe']
+    timesteps = kwargs.get('timesteps', None)
 
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True, with_flops=True) as prof:
       with record_function("model_inference"):
         _ = pipe(
-          anns[0], 
+          prompt = anns[0], 
           num_inference_steps=nfe, 
+          timesteps = timesteps,
           guidance_scale=5, 
           output_type='latent'
         )

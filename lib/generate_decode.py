@@ -56,8 +56,6 @@ def decode_vae(pipe, latents, batch_size=1):
 
 
 
-
-
 @torch.inference_mode()
 def generate_part(pipe, anns, nfe=None, timesteps=None, batch_size=16, save_path=None, i_from=0, i_to=None):
   device = pipe.device

@@ -122,6 +122,23 @@ def ts_to_probs(ts):
 
 
 # =============================================================================
+# AYS
+# =============================================================================
+def _get_ays_timesteps_ts(num_inference_steps):
+  ays_ts_10 = np.array([999, 845, 730, 587, 443, 310, 193, 116, 53, 13])
+  new_ts = _loglinear_interp(ays_ts_10, num_inference_steps)
+  return new_ts.round().astype(int)
+
+def _loglinear_interp(t_steps, num_steps):
+  xs = np.linspace(0, 1, len(t_steps))
+  ys = np.log(t_steps[::-1])
+  new_xs = np.linspace(0, 1, num_steps)
+  new_ys = np.interp(new_xs, xs, ys)
+  interped_ys = np.exp(new_ys)[::-1].copy()
+  return interped_ys
+
+
+# =============================================================================
 # LPIPS
 # =============================================================================
 def lpips(imgs1, imgs2, lpips_net):

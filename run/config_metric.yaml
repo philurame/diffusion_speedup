@@ -1,10 +1,23 @@
+model_names:
+- SDXL_BASE
+# - DEEPCACHE2
+# - DEEPCACHE3
+# - DEEPCACHE4
+# - HQQ
+# - VQDM
+
 solvers:
 # - DDIM
 # - DPMS
-- DEIS
 # - IPNDM
 # - POLS
-# - LIN
+
+# - DEIS
+# - COEF
+# - COEFEXT
+# - COEFEXT2
+# - COEFEXTF
+# - TCOEFUP*4|1
 
 schedulers:
 # - CUSTOM
@@ -12,26 +25,48 @@ schedulers:
 # - AYS
 # - KARRAS
 # - SNR
-- STUDENTDEIS40
-- STUDENTDDIM200
 
-model_names:
-# - SDXL_BASE
-- DEEPCACHE2
-# - DEEPCACHE3
-# - DEEPCACHE4
-# - HQQ
-# - VQDM
+# - TDEIS
+# - TCOEF
+# - TCOEFEXT
+# - TCOEFEXT2
+# - TCOEFEXTF
+# - TCOEFUP*4|1
+# - TUCOEFEXT
+# - TUCOEFEXT2
+
+solvers_schedulers_nfes:
+- DEIS_LINEAR_4
+- COEF_TCOEF_4
+- DEIS_TDEIS_4
+- COEF41UP_TCOEF41UP_4
+- COEFEXT_TCOEFEXT_4
+- COEFEXT2_TCOEFEXT2_4
+- COEFEXTF_TCOEFEXTF_4
+- COEFEXT_TUCOEFEXT_4
+- COEFEXT2_TUCOEFEXT2_4
+
+- DEIS_LINEAR_10
+- COEF_TCOEF_10
+- DEIS_TDEIS_10
+- COEF41UP_TCOEF41UP_10
+- COEFEXT_TCOEFEXT_10
+- COEFEXT2_TCOEFEXT2_10
+- COEFEXTF_TCOEFEXTF_10
+- COEFEXT_TUCOEFEXT_10
+- COEFEXT2_TUCOEFEXT2_10
+
 
 nfes:
+# - 4
 # - 5
 # - 6
 # - 7
 # - 8
 # - 9
 # - 10
-- 11
-- 12
+# - 11
+# - 12
 # - 13
 # - 14
 # - 17
@@ -45,15 +80,15 @@ nfes:
 # - 200
 
 datasets:
-- COCO
-# - COCO30
+# - COCO
+- COCO30
 # - PARTI
 
 metrics: # non-grid
 # - SEC_PER_IMG
 - LPIPS
-- FID
-- IS
-- CLIP
+# - FID
+# - IS
+# - CLIP
 # - CIFAR_FID
 # - TFLOPS

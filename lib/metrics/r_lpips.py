@@ -7,25 +7,28 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 class LPIPS:
   def __call__(self, **kwargs):
     dataset = kwargs['dataset']
-    if dataset != 'COCO':
+    if dataset not in ['COCO', 'COCO30']:
       return None
 
-    imgs_gen = kwargs['imgs_gen']
-    n_imgs = min(10_000, len(imgs_gen))
-    batch_size = min(250, n_imgs)
-    imgs_gen = imgs_gen[:n_imgs]
-    imgs_gen_cropped = torch.nn.functional.interpolate(imgs_gen, size=(224, 224), mode='bilinear', align_corners=False)
-
     path_ddim_200 = kwargs['path_ddim_200']
-    imgs_200  = torch.load(path_ddim_200, weights_only=False, map_location='cpu')[:n_imgs]
+    imgs_200  = torch.load(path_ddim_200, weights_only=False, map_location='cpu')
+
+    imgs_gen = kwargs['imgs_gen']
+    n_imgs = min(len(imgs_200), len(imgs_gen))
+    imgs_200 = imgs_200[:n_imgs]
+    imgs_gen = imgs_gen[:n_imgs]
+
+    imgs_gen_224 = torch.nn.functional.interpolate(imgs_gen, size=(224, 224), mode='bilinear', align_corners=False)
 
     lpips_model = LearnedPerceptualImagePatchSimilarity(net_type='vgg').net.to('cpu')
     lpips_model.eval()
 
+    batch_size = min(250, n_imgs)
+
     diffs_sum = 0
     for i in tqdm.tqdm(range(0, n_imgs, batch_size), desc='LPIPS...'):
       feats_200 = self.get_features(imgs_200[i:i+batch_size], lpips_model)
-      feats_gen = self.get_features(imgs_gen_cropped[i:i+batch_size], lpips_model)
+      feats_gen = self.get_features(imgs_gen_224[i:i+batch_size], lpips_model)
       diffs_sum += self.lpips_sum(feats_200, feats_gen, lpips_model)
 
     return diffs_sum / n_imgs

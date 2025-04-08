@@ -40,9 +40,11 @@ def construct_pipeline(solver, scheduler, model_name, half=True, **pipe_kwargs):
 @click.option('--solver', type=str, required=True, help='supported methods are in lib/solvers')
 @click.option('--scheduler', type=str, required=True, help='supported methods are in lib/schedulers')
 @click.option('--nfe', type=int, required=True, help='num inference steps')
-@click.option('--max_samples', type=int, default=10_000)
+@click.option('--max_samples', type=int, default=30_000)
 @click.option('--batch_size', type=int, default=128)
 @click.option('--device', type=int, required=False, default=-1)
+@click.option('--key', type=str, required=False, default='')
+@click.option('--metric_names', type=str, required=False, default='')
 def main(**kwargs):
   kwargs['device'] = 'cuda' if kwargs['device'] == -1 else f"cuda:{kwargs['device']}"
   max_samples = kwargs['max_samples']

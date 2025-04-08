@@ -54,3 +54,11 @@ class SchedulerMixin:
   
   def sigma_to_alpha_t(self, sigma): # returns sqrt(alpha_t)
     return  1 / ((sigma**2 + 1) ** 0.5)
+  
+  def eps_pred_from(self, prediction_type, noise_pred, latents):
+    if prediction_type == "epsilon":
+      return noise_pred
+    if prediction_type == "v_prediction":
+      sigma_t = self.sigmas[self.step_index]
+      alpha_t = self.sigma_to_alpha_t(sigma_t)
+      return alpha_t * (latents * sigma_t + noise_pred)

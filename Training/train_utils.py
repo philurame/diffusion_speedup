@@ -180,6 +180,53 @@ def _normalize_tensor(in_feat, eps=1e-8):
 
 
 
+
+def get_patched_lpips(imgs1, imgs2, lpips_net, patch_size=128, stride=64, l2_mult=False, reduction='mean'):
+  '''imgs are the teacher imgs'''
+
+  # Rescale imgs1 if needed (same logic as in lpips function)
+  m, M = imgs1.min().item(), imgs1.max().item()
+  if m >= -0.01 and M < 2: # assume [0,1] -> scale to [-1,1]
+    imgs1 = imgs1 * 2 - 1
+    imgs2 = imgs2 * 2 - 1
+  elif m >= -0.01: # assume [0,255] -> scale to [-1,1]
+    imgs1 = imgs1 / 127.5 - 1
+    imgs2 = imgs2 / 127.5 - 1
+
+  B, C, H, W = imgs1.shape
+  # feats2[0] should correspond to the first-layer feature map for the entire teacher image
+  # We'll infer teacher's full H,W from feats2[0], assuming the network did not downsize at the first layer.
+  # If the first layer already has strides, adjust accordingly.
+
+  total_loss = 0.
+  c = 0
+  # Slide over imgs1 in 128x128 patches with stride=64
+  for y in range(0, H - patch_size + 1, stride):
+    for x in range(0, W - patch_size + 1, stride):
+      # Extract patch from imgs1
+      patch1 = imgs1[:, :, y:y+patch_size, x:x+patch_size]
+      patch2 = imgs2[:, :, y:y+patch_size, x:x+patch_size]
+      patch1_224 = torch.nn.functional.interpolate(patch1, size=(224, 224), mode='bilinear')
+      patch2_224 = torch.nn.functional.interpolate(patch2, size=(224, 224), mode='bilinear')
+      # Compute features for this patch
+      feats1 = get_features(patch1_224, lpips_net)
+      feats2 = get_features(patch2_224, lpips_net)
+
+      lpips_val = get_lpips(feats1, feats2, lpips_net, reduction='sum')
+
+      l2_val = 1
+      if l2_mult:
+        l2_val = torch.nn.functional.mse_loss(patch1, patch2, reduction='mean')
+      loss = lpips_val * l2_val
+      total_loss += loss
+      c += 1
+
+  if reduction == 'mean':
+    c *= B
+  return total_loss / c
+
+
+
 # =============================================================================
 # WANDB LOGGING SPECIAL
 # =============================================================================

@@ -30,6 +30,7 @@ def construct_pipeline(solver, scheduler, model_name, half=True, **pipe_kwargs):
   # combine solver and scheduler
   class SolverSchedulerConstructor(SchedulerClass, SolverClass): pass
   pipe.scheduler = SolverSchedulerConstructor(config=pipe.scheduler_config)
+
   return pipe
 
 
@@ -57,7 +58,7 @@ def calc_metrics(metric_names, **data):
 @click.option('--metric_names', type=str, required=True, help='list of metrics separated by comma')
 @click.option('--key', type=str, default=None)
 @click.option('--wandb_project_name', type=str, default='DIFFUSION_METRICS')
-@click.option('--max_samples', type=int, default=10_000)
+@click.option('--max_samples', type=int, default=30_000)
 @click.option('--batch_size', type=int, default=16)
 @click.option('--device', type=int, default=-1)
 def main(**kwargs):
@@ -77,7 +78,11 @@ def main(**kwargs):
   
   data_path = os.path.join(ROOT, 'DATA')
   save_path = os.path.join(data_path, model_name, f'{dataset}_{nfe}', f'{solver}_{scheduler}.pt')
-  path_ddim_200 = os.path.join(data_path, 'imgs_ddim200_224.pt')
+
+  if dataset == 'COCO':
+    path_ddim_200 = os.path.join(data_path, 'imgs_ddim200_224.pt')
+  elif dataset == 'COCO30':
+    path_ddim_200 = os.path.join(data_path, 'imgs30_DDIM200_224.pt')
 
   print(
     '\n'+'#'*50, 

@@ -1,161 +1,136 @@
 from lib.registries import solver_registry
+from lib.solvers.trainable.set_deis import SETDEIS2
 import torch
 
 @solver_registry.add_to_registry("COEF")
-class COEFSolver:
+class COEFSolver(SETDEIS2):
   order = 3
   is_trainable = True
   def step(self, model_output, sample=None, **kwargs):
-    self.model_outputs = [0., 0.] + [i for i in self.model_outputs if i is not None]
-    self.model_outputs = [sample] + self.model_outputs[-2:] + [model_output]
+    self.model_outputs = [i for i in self.model_outputs if i is not None]
+    self.model_outputs = [model_output] + self.model_outputs[:2]
 
-    deltas      = self.train_params[self.step_index]
-    deis_coeffs = self.deis_coeffs[self.step_index]
-    coeffs = deis_coeffs + deltas
+    c_x, c_eps, c_eps1 = self.get_deis_coeffs()
+    deltas = self.train_params[self.step_index][:-1 if self.step_index == 0 else None]
 
-    prev_sample = sum([i * j for i, j in zip(coeffs, self.model_outputs)])
+    deis_coeffs = [c_x, c_eps, c_eps1, 0][:self.step_index+2]
+    coeffs = [i + j for i, j in zip(deis_coeffs, deltas)]
+    prev_sample = sum([i * j for i, j in zip(coeffs, [sample] + self.model_outputs)])
 
     self.step_index += 1
     return prev_sample
 
-  def set_train_solver(self, num_inference_steps, device=None):
-    '''sets 2 order lin_coeffs according to DEIS LINEAR'''
-
-    timesteps = torch.linspace(0, self.num_train_timesteps - 1, num_inference_steps + 1).round().flip(0)[:-1]
-    sigmas = ((1 - self.alphas_cumprod) / self.alphas_cumprod).sqrt()
-    idx_lower = timesteps.floor().long()
-    idx_upper = idx_lower + 1
-    idx_upper = torch.where(idx_upper >= sigmas.shape[0], idx_lower, idx_upper)
-    w = timesteps - idx_lower.to(timesteps.dtype)
-    sigma_interp = sigmas[idx_lower] * (1 - w) + sigmas[idx_upper] * w
-    sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]).sqrt().unsqueeze(0)
-    sigmas = torch.cat([sigma_interp, sigma_last]).to(torch.float32)
-
-    self.deis_coeffs = []
-    for step_index in range(num_inference_steps):
-      sigma_t, sigma_s = sigmas[step_index + 1], sigmas[step_index]
-      alpha_t, alpha_s = self.sigma_to_alpha_t(sigma_t), self.sigma_to_alpha_t(sigma_s)
-
-      if step_index == 0:
-        self.deis_coeffs.append([(alpha_t/alpha_s).item(), 0, 0, (-alpha_t * (sigma_s - sigma_t)).item()])
-        continue
-
-      def ind_fn(t, b, c):
-        return t * (-torch.log(c) + torch.log(t) - 1) / (torch.log(b) - torch.log(c))
-
-      sigma_ss = sigmas[step_index - 1]
-      coef1 = ind_fn(sigma_t, sigma_s, sigma_ss) - ind_fn(sigma_s, sigma_s, sigma_ss)
-      coef2 = ind_fn(sigma_t, sigma_ss, sigma_s) - ind_fn(sigma_s, sigma_ss, sigma_s)
-
-      self.deis_coeffs.append([(alpha_t/alpha_s).item(), 0, (alpha_t*coef2).item(), (alpha_t*coef1).item()])
-    
-    self.deis_coeffs  = torch.torch.tensor(self.deis_coeffs, dtype=torch.float32)
+  def set_train_solver(self, num_inference_steps=None, timesteps=None, device=None):
+    num_inference_steps = num_inference_steps or len(timesteps)
     self.train_params = torch.nn.Parameter(torch.zeros(num_inference_steps, 4, dtype=torch.float32, requires_grad=True))
 
 
+
 @solver_registry.add_to_registry("_COEF10")
-class COEFSolverTest:
+class COEFSolverTest10(COEFSolver):
   order = 3
   is_trainable = True
+  def set_train_solver(self, num_inference_steps=None, timesteps=None, device=None):
+    num_inference_steps = num_inference_steps or len(timesteps)
+    init = torch.randn(num_inference_steps, 4, dtype=torch.float32, generator=torch.Generator().manual_seed(0)) / 10
+    self.train_params = torch.nn.Parameter(init, requires_grad=True)
+
+
+@solver_registry.add_to_registry("COEFEXT")
+class COEFEXT(SETDEIS2):
+  order = 10
+  is_trainable = True
   def step(self, model_output, sample=None, **kwargs):
-    self.model_outputs = [0., 0.] + [i for i in self.model_outputs if i is not None]
-    self.model_outputs = [sample] + self.model_outputs[-2:] + [model_output]
+    self.model_outputs = [model_output] + self.model_outputs[:self.step_index]
 
-    deltas      = self.train_params[self.step_index]
-    deis_coeffs = self.deis_coeffs[self.step_index]
-    coeffs = deis_coeffs + deltas
+    c_x, c_eps, c_eps1 = self.get_deis_coeffs()
+    deis_coeffs = ([c_x, c_eps, c_eps1] + [0.]*self.step_index)[:self.step_index+2]
+    deltas = self.train_params[self.step_index]
 
-    prev_sample = sum([i * j for i, j in zip(coeffs, self.model_outputs)])
+    coeffs = [i + j for i, j in zip(deis_coeffs, deltas)]
+    prev_sample = sum([i * j for i, j in zip(coeffs, [sample] + self.model_outputs)])
 
     self.step_index += 1
     return prev_sample
 
-  def set_train_solver(self, num_inference_steps, device=None):
-    '''sets 2 order lin_coeffs according to DEIS LINEAR'''
-
-    timesteps = torch.linspace(0, self.num_train_timesteps - 1, num_inference_steps + 1).round().flip(0)[:-1]
-    sigmas = ((1 - self.alphas_cumprod) / self.alphas_cumprod).sqrt()
-    idx_lower = timesteps.floor().long()
-    idx_upper = idx_lower + 1
-    idx_upper = torch.where(idx_upper >= sigmas.shape[0], idx_lower, idx_upper)
-    w = timesteps - idx_lower.to(timesteps.dtype)
-    sigma_interp = sigmas[idx_lower] * (1 - w) + sigmas[idx_upper] * w
-    sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]).sqrt().unsqueeze(0)
-    sigmas = torch.cat([sigma_interp, sigma_last]).to(torch.float32)
-
-    self.deis_coeffs = []
-    for step_index in range(num_inference_steps):
-      sigma_t, sigma_s = sigmas[step_index + 1], sigmas[step_index]
-      alpha_t, alpha_s = self.sigma_to_alpha_t(sigma_t), self.sigma_to_alpha_t(sigma_s)
-
-      if step_index == 0:
-        self.deis_coeffs.append([(alpha_t/alpha_s).item(), 0, 0, (-alpha_t * (sigma_s - sigma_t)).item()])
-        continue
-
-      def ind_fn(t, b, c):
-        return t * (-torch.log(c) + torch.log(t) - 1) / (torch.log(b) - torch.log(c))
-
-      sigma_ss = sigmas[step_index - 1]
-      coef1 = ind_fn(sigma_t, sigma_s, sigma_ss) - ind_fn(sigma_s, sigma_s, sigma_ss)
-      coef2 = ind_fn(sigma_t, sigma_ss, sigma_s) - ind_fn(sigma_s, sigma_ss, sigma_s)
-
-      self.deis_coeffs.append([(alpha_t/alpha_s).item(), 0, (alpha_t*coef2).item(), (alpha_t*coef1).item()])
-    
-    self.deis_coeffs = torch.torch.tensor(self.deis_coeffs, dtype=torch.float32)
-    init = torch.zeros(num_inference_steps, 4, dtype=torch.float32)
-    init += torch.randn(num_inference_steps, 4, dtype=torch.float32, generator=torch.Generator().manual_seed(0)) / 10
-    self.train_params = torch.nn.Parameter(init, requires_grad=True)
+  def set_train_solver(self, num_inference_steps=None, timesteps=None, device=None):
+    num_inference_steps = num_inference_steps or len(timesteps)
+    self.train_params = []
+    for i in range(num_inference_steps):
+      self.train_params.append(torch.zeros(i+2, dtype=torch.float32, requires_grad=True))
 
 
-@solver_registry.add_to_registry("_COEF100")
-class COEFSolverTest1:
-  order = 3
+@solver_registry.add_to_registry("COEFEXT2")
+class COEFEXT2(SETDEIS2):
+  order = 10
   is_trainable = True
   def step(self, model_output, sample=None, **kwargs):
-    self.model_outputs = [0., 0.] + [i for i in self.model_outputs if i is not None]
-    self.model_outputs = [sample] + self.model_outputs[-2:] + [model_output]
+    self.model_outputs = [model_output] + self.model_outputs[:self.step_index] 
+    if self.step_index == 0:
+      self.prev_xt = []
 
-    deltas      = self.train_params[self.step_index]
-    deis_coeffs = self.deis_coeffs[self.step_index]
-    coeffs = deis_coeffs + deltas
+    c_x, c_eps, c_eps1 = self.get_deis_coeffs()
+    deis_coeffs = ([c_x, c_eps, c_eps1] + [0.]*self.step_index)[:self.step_index+2]
+    deltas = self.train_params[self.step_index][:self.step_index+2]
 
-    prev_sample = sum([i * j for i, j in zip(coeffs, self.model_outputs)])
+    coeffs = [i + j for i, j in zip(deis_coeffs, deltas)]
+    prev_sample  = sum([i * j for i, j in zip(coeffs, [sample] + self.model_outputs)])
+
+    deltas1 = self.train_params[self.step_index][self.step_index+2:]
+    prev_sample += sum([i * j for i, j in zip(deltas1, self.prev_xt)])
+
+    self.prev_xt = [prev_sample] + self.prev_xt
 
     self.step_index += 1
     return prev_sample
 
-  def set_train_solver(self, num_inference_steps):
-    '''sets 2 order lin_coeffs according to DEIS LINEAR'''
+  def set_train_solver(self, num_inference_steps=None, timesteps=None, device=None):
+    num_inference_steps = num_inference_steps or len(timesteps)
 
-    timesteps = torch.linspace(0, self.num_train_timesteps - 1, num_inference_steps + 1).round().flip(0)[:-1]
-    sigmas = ((1 - self.alphas_cumprod) / self.alphas_cumprod).sqrt()
-    idx_lower = timesteps.floor().long()
-    idx_upper = idx_lower + 1
-    idx_upper = torch.where(idx_upper >= sigmas.shape[0], idx_lower, idx_upper)
-    w = timesteps - idx_lower.to(timesteps.dtype)
-    sigma_interp = sigmas[idx_lower] * (1 - w) + sigmas[idx_upper] * w
-    sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]).sqrt().unsqueeze(0)
-    sigmas = torch.cat([sigma_interp, sigma_last]).to(torch.float32)
+    self.train_params = []
+    for i in range(num_inference_steps):
+      self.train_params.append(torch.zeros(2*i+2, dtype=torch.float32, requires_grad=True))
 
-    self.deis_coeffs = []
-    for step_index in range(num_inference_steps):
-      sigma_t, sigma_s = sigmas[step_index + 1], sigmas[step_index]
-      alpha_t, alpha_s = self.sigma_to_alpha_t(sigma_t), self.sigma_to_alpha_t(sigma_s)
 
-      if step_index == 0:
-        self.deis_coeffs.append([(alpha_t/alpha_s).item(), 0, 0, (-alpha_t * (sigma_s - sigma_t)).item()])
-        continue
 
-      def ind_fn(t, b, c):
-        return t * (-torch.log(c) + torch.log(t) - 1) / (torch.log(b) - torch.log(c))
+@solver_registry.add_to_registry("COEFEXTF")
+class COEFEXTF(SETDEIS2):
+  order = 10
+  is_trainable = True
+  fourier_crop = 50
+  def step(self, model_output, sample=None, **kwargs):
+    self.model_outputs = [model_output] + self.model_outputs[:self.step_index]
 
-      sigma_ss = sigmas[step_index - 1]
-      coef1 = ind_fn(sigma_t, sigma_s, sigma_ss) - ind_fn(sigma_s, sigma_s, sigma_ss)
-      coef2 = ind_fn(sigma_t, sigma_ss, sigma_s) - ind_fn(sigma_s, sigma_ss, sigma_s)
+    c_x, c_eps, c_eps1 = self.get_deis_coeffs()
+    deis_coeffs = ([c_x, c_eps, c_eps1] + [0.]*self.step_index)[:self.step_index+2]
+    deltas = self.train_params[self.step_index]
 
-      self.deis_coeffs.append([(alpha_t/alpha_s).item(), 0, (alpha_t*coef2).item(), (alpha_t*coef1).item()])
+    coeffs = [i + j for i, j in zip(deis_coeffs, deltas[:self.step_index+2])]
+    prev_sample = sum([i * j for i, j in zip(coeffs, [sample] + self.model_outputs)])
+
+    fx = self.fourier(sample)
+    prev_sample += deltas[-1]*fx
+
+    self.step_index += 1
+    return prev_sample
+
+  def set_train_solver(self, num_inference_steps=None, timesteps=None, device=None):
+    num_inference_steps = num_inference_steps or len(timesteps)
+    self.train_params = []
+    for i in range(num_inference_steps):
+      self.train_params.append(torch.zeros(i+3, dtype=torch.float32, requires_grad=True))
+  
+  def fourier(self, x):
+    img_dims = len(x.shape)-2, len(x.shape)-1
+    freq = torch.fft.fft2(x)
+    freq = torch.fft.fftshift(freq, dim=img_dims)
+    c_x, c_y = x.shape[-2] // 2, x.shape[-1] // 2
     
-    self.deis_coeffs = torch.torch.tensor(self.deis_coeffs, dtype=torch.float32)
-    init = torch.zeros(num_inference_steps, 4, dtype=torch.float32)
-    init += torch.randn(num_inference_steps, 4, dtype=torch.float32, generator=torch.Generator().manual_seed(0)) / 100
-    self.train_params = torch.nn.Parameter(init, requires_grad=True)
+    freq_center = torch.zeros_like(freq)
+    d = self.fourier_crop
+    freq_center[..., c_x - d: c_x + d, c_y - d:c_y + d] = freq[..., c_x - d: c_x + d, c_y - d:c_y + d]
+    freq_resid = freq - freq_center
+
+    freq_resid  = torch.fft.ifftshift(freq_resid,  dim=img_dims)
+    x_resid  = torch.real(torch.fft.ifft2(freq_resid))
+    return x_resid

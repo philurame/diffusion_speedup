@@ -1,10 +1,10 @@
 import sys, os, wandb, click
 import warnings
 warnings.filterwarnings('ignore')
-ROOT = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP'
-sys.path.append(ROOT)
-with open(os.path.join(os.path.dirname(ROOT), 'wandb_key.txt'), 'r') as f:
-  WANDB_KEY = f.read().strip()
+ROOT = '/home/maliev/Huawei/DIFFUSION_SPEEDUP'
+# sys.path.append(ROOT)
+# with open(os.path.join(os.path.dirname(ROOT), 'wandb_key.txt'), 'r') as f:
+WANDB_KEY = "ab888ce1f2f170f823dedfc2ee7cae69cdd33ee0"
 
 
 def get_params(kwargs):
@@ -14,6 +14,10 @@ def get_params(kwargs):
     }
   
   if kwargs['model'] == 'SDXL_TRAIN':
+    p['val_size'] = 16
+    p['p_dataset'] = os.path.join(ROOT, 'DATA', 'TRAIN_DATA', f'{kwargs["teacher_name"]}.pkl')
+
+  elif kwargs['model'] == 'SDXL_BASE':
     p['val_size'] = 16
     p['p_dataset'] = os.path.join(ROOT, 'DATA', 'TRAIN_DATA', f'{kwargs["teacher_name"]}.pkl')
 
@@ -55,6 +59,7 @@ def get_params(kwargs):
 @click.option("--img_log_interval", type=int, default=5)
 @click.option("--log_jacobian", type=bool, default=False)
 @click.option("--save_solv_params", type=str, default='')
+@click.option("--num_samples", type=int, default=1)
 def main(**kwargs):
   # os.environ["CUDA_VISIBLE_DEVICES"] = kwargs['device']
   kwargs['device'] = f"cuda:{kwargs['device']}"
@@ -88,7 +93,10 @@ def main(**kwargs):
   sys.stdout.flush()
 
   wandb.login(key=WANDB_KEY, relogin=True)
-  wandb.init(project=proj_name, config=kwargs, name=run_name)
+  wandb.init(project=proj_name, config=kwargs, name=run_name, mode = 'online')
+  # mode      = 'online'
+  # mode      = 'offline'
+  # mode      = 'disabled'
 
   from train_class import Trainer
   trainer = Trainer(wandb.config)

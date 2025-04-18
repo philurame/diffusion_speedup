@@ -3,6 +3,7 @@ from train_utils import _get_ays_timesteps_ts
 
 import time, torch, wandb, tqdm, torch.optim as optim, pickle
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from torch.distributions import Normal
 
 
 class Trainer:
@@ -34,6 +35,14 @@ class Trainer:
 
     self.pipe = construct_pipeline(self.config.solver, 'CUSTOM', self.config.model, is_train=True, device=self.config.device)
 
+    # mishan: add reinforce things
+    self.num_samples = self.config.num_samples
+    if self.num_samples > 1:
+      self.USE_REINFORCE = True
+      self.TRAIN_REINFORCE = True
+      self.reinforce_timesteps = None
+      self.reinforce_ts_logits = None
+
     self.ts_param = TSParam(self.config.ts_param_method)
     self._init_timestemps()
     
@@ -41,7 +50,15 @@ class Trainer:
 
     if self.config.train_timesteps:
       self.ts_logits = torch.nn.Parameter(self.ts_logits, requires_grad=True)
-      train_params.append({"params": self.ts_logits, "lr": self.config.lr_ts})
+      temp_params = {
+        "params": self.ts_logits,
+        "lr": self.config.lr_ts
+      }
+      # mishan: add sigma parameter for reinforce
+      if self.USE_REINFORCE:
+        self.sigma_logit = torch.nn.Parameter(0.1*torch.ones(1, requires_grad=True), requires_grad=True)
+        temp_params['sigma_logit'] = self.sigma_logit
+      train_params.append(temp_params)
     
     if self.config.train_timesteps_unet:
       self.uts_logits = self.ts_logits.clone().detach()
@@ -56,7 +73,6 @@ class Trainer:
     self.optimizer = optim.Adam(train_params)
     self.global_step = 0  
 
-  
   def _init_timestemps(self):
     timesteps = torch.linspace(0, 999, self.config.nfe + 1).round().flip(0)[:-1]
     if self.config.ts_start_method == 'linear':
@@ -96,7 +112,12 @@ class Trainer:
     for epoch in tqdm.tqdm(range(self.config.epochs)):
       self.epoch = epoch
       
+      # mishan:
+      if self.USE_REINFORCE:
+        self.TRAIN_REINFORCE = True
       train_loss, train_imgs_log = self.train_epoch()
+      if self.USE_REINFORCE:
+        self.TRAIN_REINFORCE = False
       torch.cuda.synchronize()
       time_train, time_last = time_last, time.perf_counter()
       time_train = time_last - time_train
@@ -148,13 +169,15 @@ class Trainer:
     n_imgs_log = int((n_imgs_log)**0.5) ** 2
     train_loss = 0
 
-    for batch_start in range(0, self.config.train_size, self.config.batch_size):
+    for batch_start in tqdm.tqdm(range(0, self.config.train_size, self.config.batch_size)):
       effective_batch_size = min(self.config.batch_size, self.config.train_size - batch_start)
       batch_loss = 0
 
       # mini-batch
       for sub in range(0, effective_batch_size, self.config.mini_batch_size):
         self.update_graph()
+        # print(f"\nTIMESTEPS: {self.timesteps}\n")
+        # print(f"\nReinforce TIMESTEPS: {self.reinforce_timesteps}\n")
 
         current_size = min(self.config.mini_batch_size, effective_batch_size - sub)
         start_idx = batch_start + sub
@@ -164,24 +187,47 @@ class Trainer:
         latents = self.train_latents[start_idx:end_idx].to(self.config.device)
 
         output_type = 'latent' if self.config.loss.startswith('latent') else 'pt'
-        gen_imgs = self.pipe(prompt=prompts, timesteps=self.timesteps, unet_timesteps=self.unet_timesteps, latents=latents, output_type=output_type)
+
+        if self.USE_REINFORCE:
+          with torch.no_grad():
+            reinforce_gen_imgs = []
+            for i in range(self.num_samples):
+              reinforce_gen_imgs.append(self.pipe(
+                prompt=prompts, timesteps=self.reinforce_timesteps[i], unet_timesteps=self.unet_timesteps, latents=latents.to(torch.float16), output_type=output_type))
+            
+            # for validation part
+            gen_imgs = self.pipe(prompt=prompts, timesteps=self.timesteps, unet_timesteps=self.unet_timesteps, latents=latents.to(torch.float16), output_type=output_type)
+        else:
+          gen_imgs = self.pipe(prompt=prompts, timesteps=self.timesteps, unet_timesteps=self.unet_timesteps, latents=latents, output_type=output_type)
         
         if len(train_imgs_log) < n_imgs_log and not self.config.model.startswith('SORA'):
           log_imgs = gen_imgs[:n_imgs_log]
           if output_type == 'latent':
             with torch.no_grad():
               log_imgs = self.pipe.decode_latents(log_imgs) * 2 - 1
-          train_imgs_log = train_imgs_log + [i for i in log_imgs.cpu()]
+          train_imgs_log = train_imgs_log + [i for i in log_imgs.cpu()]          
 
-        raw_loss = self.get_train_loss(gen_imgs, start_idx, end_idx)
+        if self.USE_REINFORCE:
+          fraw_loss, raw_loss = self.get_train_loss(reinforce_gen_imgs, start_idx, end_idx)
 
-        loss = raw_loss / effective_batch_size
-        loss.backward()
-        train_loss += raw_loss.item()
-        batch_loss += raw_loss.item()
+          loss = fraw_loss / effective_batch_size
+          loss.backward()
+          train_loss += raw_loss.item()
+          batch_loss += raw_loss.item()
+        else:
+          raw_loss = self.get_train_loss(gen_imgs, start_idx, end_idx)
+
+          loss = raw_loss / effective_batch_size
+          loss.backward()
+          train_loss += raw_loss.item()
+          batch_loss += raw_loss.item()
       
       batch_loss = batch_loss / effective_batch_size
-      log_dict = {f'train/batch_{self.config.loss}' : batch_loss}
+      if self.USE_REINFORCE:
+        # mishan: "flpips" -> "lpips"
+        log_dict = {f'train/batch_{self.config.loss[1:]}' : batch_loss}
+      else:
+        log_dict = {f'train/batch_{self.config.loss}' : batch_loss}
       self.log_clip_grad_step(log_dict)
     
     train_loss = train_loss / self.config.train_size
@@ -191,12 +237,73 @@ class Trainer:
   
   def update_graph(self):
     if self.config.train_timesteps:
-      self.timesteps = self.ts_param(self.ts_logits)
+      # mishan: add reinforce here because we mostly use it
+      if self.USE_REINFORCE and self.TRAIN_REINFORCE:
+        self.normal = Normal(self.ts_logits, torch.exp(self.sigma_logit) * torch.ones_like(self.ts_logits))
+
+        self.reinforce_ts_logits = self.normal.sample(torch.Size([self.num_samples]))
+
+        self.reinforce_timesteps = []
+        for i in range(self.num_samples):
+          self.reinforce_timesteps.append(self.ts_param(self.reinforce_ts_logits[i]))
+        
+        self.timesteps = self.ts_param(self.ts_logits)
+      else:  
+        self.timesteps = self.ts_param(self.ts_logits)
     if self.config.train_timesteps_unet:
       self.unet_timesteps = self.ts_param(self.uts_logits)
 
 
   def get_train_loss(self, gen_imgs, start_idx, end_idx):
+
+    # mishan: add reinforce loss
+    if self.config.loss == 'flpips' and self.USE_REINFORCE:
+      teacher_features = tuple(i[start_idx:end_idx] for i in self.train_teacher_features)
+
+      lpips_losses = []
+
+      for temp_gen_imgs in gen_imgs:
+        imgs_interp = torch.nn.functional.interpolate(temp_gen_imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
+        gen_features = get_features(imgs_interp, self.lpips_model)
+        lpips_loss = get_lpips(teacher_features, gen_features, self.lpips_model, reduction='none')
+        lpips_losses.append(lpips_loss) 
+
+      lpips_losses       = torch.stack(lpips_losses, dim=0) # [num_samples, batch_size]
+      lpips_losses_mean  = lpips_losses.mean(dim=0)
+      lpips_corrected    = (lpips_losses - lpips_losses_mean[None, :]).detach() 
+      logprob            = self.normal.log_prob(self.reinforce_ts_logits).sum(dim=1).to(self.config.device)
+
+      floss_lpips = (lpips_corrected * logprob[:, None]).mean() * (self.num_samples) / (self.num_samples - 1)
+      return floss_lpips, lpips_losses_mean.mean()
+    
+    if self.config.loss == 'fl2' and self.USE_REINFORCE:
+      # student_imgs = gen_imgs
+      # teacher_imgs = self.train_teacher_imgs[start_idx:end_idx]
+      # raw_loss = F.l1_loss(student_imgs, teacher_imgs.to(self.config.device), reduction='none')
+      # raw_loss = raw_loss.mean(dim=list(range(1,len(raw_loss.shape)))).sum()
+      # return raw_loss
+
+      student_imgs = gen_imgs
+      teacher_imgs = self.train_teacher_imgs[start_idx:end_idx]
+
+      l2_losses = []
+
+      for temp_gen_imgs in student_imgs:
+        l2_loss = F.mse_loss(temp_gen_imgs, teacher_imgs.to(self.config.device), reduction='none')
+        l2_loss = l2_loss.mean(dim=list(range(1,len(l2_loss.shape))))#.sum()
+        # print(f"L2-loss = {l2_loss}")
+        # print(f"L2-loss.shape = {l2_loss.shape}")
+        l2_losses.append(l2_loss) 
+
+      # print(f"L2-loss.shape = {l2_losses}")
+      l2_losses       = torch.stack(l2_losses, dim=0)  # [num_samples, batch_size]
+      l2_losses_mean  = l2_losses.mean(dim=0)
+      l2_corrected    = (l2_losses - l2_losses_mean[None, :]).detach() 
+      logprob         = self.normal.log_prob(self.reinforce_ts_logits).sum(dim=1).to(self.config.device)
+
+      floss_l2 = (l2_corrected * logprob[:, None]).mean() * (self.num_samples) / (self.num_samples - 1)
+      return floss_l2, l2_losses_mean.mean()
+
     if self.config.loss.startswith('latent'):
       teacher_latents = self.train_teacher_latents_out[start_idx:end_idx].to(self.config.device)
       if self.config.loss == 'latentl2':
@@ -265,10 +372,10 @@ class Trainer:
     
     if self.config.train_timesteps_unet:
       params_to_clip.append(self.uts_logits)
-      log_dict['grad_general/unet_ts_grad_norm'] = self.uts_logits.grad.norm(2).item()
-      log_dict['grad_general/unet_ts_grad_mean'] = self.uts_logits.grad.mean().item()
-      log_dict['grad_general/unet_ts_grad_90%']  = self.uts_logits.grad.abs().quantile(0.9).item()
-      log_dict['grad_general/unet_ts_grad_std']  = self.uts_logits.grad.std().item()
+      # log_dict['grad_general/unet_ts_grad_norm'] = self.uts_logits.grad.norm(2).item()
+      # log_dict['grad_general/unet_ts_grad_mean'] = self.uts_logits.grad.mean().item()
+      # log_dict['grad_general/unet_ts_grad_90%']  = self.uts_logits.grad.abs().quantile(0.9).item()
+      # log_dict['grad_general/unet_ts_grad_std']  = self.uts_logits.grad.std().item()
         
     if self.pipe.scheduler.is_trainable:
       if isinstance(self.pipe.scheduler.train_params, torch.Tensor):
@@ -317,7 +424,7 @@ class Trainer:
 
       prompts = self.val_prompts[start_idx:end_idx]
       latents = self.val_latents[start_idx:end_idx].to(self.config.device)
-      gen_latents = self.pipe(prompt=prompts, timesteps=self.timesteps, unet_timesteps=self.unet_timesteps, latents=latents, output_type='latent')
+      gen_latents = self.pipe(prompt=prompts, timesteps=self.timesteps, unet_timesteps=self.unet_timesteps, latents=latents.to(torch.float16), output_type='latent')
 
       if self.config.model.startswith('SORA'):
         gen_imgs = []

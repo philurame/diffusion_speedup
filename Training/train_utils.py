@@ -165,15 +165,21 @@ def get_lpips(feats1, feats2, lpips_net, reduction='mean'):
   feats1 = [f.to(device) for f in feats1]
   feats2 = [f.to(device) for f in feats2]
 
-  total_loss = torch.tensor(0.0, device=device)
+  # total_loss = torch.zeros(0.0, device=device)
+  total_loss = []
   for f1, f2, lin in zip(feats1, feats2, lpips_net.lins):
     diff = (f1 - f2)**2
-    total_loss += lin(diff).mean(dim=[2, 3], keepdim=True).sum()
-    
+    # print(f'\n diff.shape={lin(diff).mean(dim=[2, 3], keepdim=True).shape} \n')
+    # total_loss += lin(diff).mean(dim=[2, 3], keepdim=True).sum()
+    total_loss.append(lin(diff).mean(dim=[2, 3], keepdim=True).squeeze())#.sum()
+  
+  
   if reduction == 'mean':
-    return total_loss / feats1[0].shape[0]
+    return sum(total_loss).sum() / feats1[0].shape[0]
   elif reduction == 'sum':
-    return total_loss
+    return sum(total_loss).sum()
+  elif reduction == 'none':
+    return sum(total_loss)
 
 def _normalize_tensor(in_feat, eps=1e-8):
   return in_feat / torch.sqrt(eps + torch.sum(in_feat**2, dim=1, keepdim=True))

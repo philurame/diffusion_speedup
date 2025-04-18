@@ -49,6 +49,7 @@ if __name__ == '__main__':
     help="List of accessible device indices (e.g., 0 1 2 ...). Defaults to 0-7.")
   args = parser.parse_args()
 
+  
   wandb_key = args.wandb_key
   is_generate = args.generate
   max_samples = args.max_samples

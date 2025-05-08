@@ -1,12 +1,9 @@
 from lib.registries import solver_registry
 
-@solver_registry.add_to_registry("IPNDM")
-class IPNDMBaseSolver:
-  order = 4
-  is_trainable = False
+@solver_registry.add_to_registry("IPNDM2")
+class IPNDM2:
+  order = 2
   def step(self, model_output, sample=None, **kwargs):
-    if len(self.timesteps) < 20: self.order = 2
-
     self.model_outputs = self.model_outputs[-3:] + [model_output]
 
     if min(self.order-1, self.step_index) == 0:
@@ -28,3 +25,14 @@ class IPNDMBaseSolver:
     alpha_t, alpha_s = self.sigma_to_alpha_t(sigma_t), self.sigma_to_alpha_t(sigma_s)
     x_t = (alpha_t / alpha_s) * sample - model_output * alpha_t * (sigma_s - sigma_t)
     return x_t
+
+
+@solver_registry.add_to_registry("IPNDM3")
+class IPNDM3(IPNDM2):
+  order = 3
+  is_trainable = False
+
+@solver_registry.add_to_registry("IPNDM4")
+class IPNDM4(IPNDM2):
+  order = 4
+  is_trainable = False

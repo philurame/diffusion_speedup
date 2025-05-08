@@ -48,7 +48,10 @@ class SchedulerMixin:
       w = timesteps - idx_lower.to(timesteps.dtype)
       sigma_interp = sigmas[idx_lower] * (1 - w) + sigmas[idx_upper] * w
 
-      sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]).sqrt().unsqueeze(0)
+      if timesteps[-1] == 0.: 
+        sigma_last = torch.tensor([0.], dtype=torch.float32)
+      else:
+        sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]).sqrt().unsqueeze(0)
       self.sigmas = torch.cat([sigma_interp, sigma_last]).to(torch.float32)
 
   
@@ -62,3 +65,9 @@ class SchedulerMixin:
       sigma_t = self.sigmas[self.step_index]
       alpha_t = self.sigma_to_alpha_t(sigma_t)
       return alpha_t * (latents * sigma_t + noise_pred)
+
+  def _sigma_to_alpha_sigma_t(self, sigma):
+    alpha_t = 1 / ((sigma**2 + 1) ** 0.5)
+    sigma_t = sigma * alpha_t
+    return alpha_t, sigma_t
+

@@ -30,10 +30,22 @@ import_dir(os.path.join(ROOT, 'lib'))
 
 ANNS = data_registry['COCO'](os.path.join(ROOT, 'DATA'), max_samples=10_000).anns
 
-def construct_pipeline(solver, scheduler, model_name, half=True, **pipe_kwargs):
+def construct_pipeline(solver, scheduler, model_name, half=True, init_solver=None, **pipe_kwargs):
   '''construct a pipeline with given model_name, solver and scheduler'''
   PipeClass   = model_registry[model_name]
-  SolverClass = solver_registry[solver]
+  
+  if init_solver is not None:
+    init_solver  = solver_registry[init_solver]
+    train_solver = solver_registry[solver]
+    class SolverClass(init_solver, train_solver):
+      def step(self, model_output, sample=None, **kwargs):
+        step_index = self.step_index
+        solver_pred = super().step(model_output, sample, **kwargs)
+        res_pred = super()._step(model_output, sample, solver_pred, step_index, **kwargs)
+        return res_pred
+  else:
+    SolverClass = solver_registry[solver]
+
   SchedulerClass = scheduler_registry[scheduler]
   pipe = PipeClass.from_pretrained(half=half, **pipe_kwargs)
   class SolverSchedulerConstructor(SchedulerClass, SolverClass): pass
@@ -119,10 +131,10 @@ def ts_to_probs(ts):
   for i in range(1, len(ts)):
     probs[i] = ts[i] / ts[i - 1]
   return probs
-
+  
 
 # =============================================================================
-# AYS
+# AYS & GITS
 # =============================================================================
 def _get_ays_timesteps_ts(num_inference_steps):
   ays_ts_10 = np.array([999, 845, 730, 587, 443, 310, 193, 116, 53, 13])
@@ -136,6 +148,42 @@ def _loglinear_interp(t_steps, num_steps):
   new_ys = np.interp(new_xs, xs, ys)
   interped_ys = np.exp(new_ys)[::-1].copy()
   return interped_ys
+
+
+def _get_gits_timesteps_ts(num_inference_steps):
+  ts_schedules = {
+    3: [998.9994506835938, 516.148193359375, 183.15957641601562],
+    4: [998.9994506835938, 682.6539916992188, 366.30621337890625, 116.55728912353516],
+    5: [998.9994506835938, 765.9013671875, 482.8583984375, 233.09194946289062, 66.60400390625],
+    6: [998.9994506835938, 782.5517578125, 549.4483032226562, 333.01324462890625, 149.83399963378906, 33.29087829589844],
+    7: [998.9994506835938, 849.1502685546875, 599.3961791992188, 399.60919189453125, 216.47007751464844, 83.26032257080078, 16.647491455078125],
+    8: [998.9994506835938, 849.1502685546875, 649.3515625, 466.19342041015625, 299.7054443359375, 166.52090454101562, 66.60400390625, 16.647491455078125],
+    9: [998.9994506835938, 849.1502685546875, 699.30224609375, 549.4483032226562, 399.60919189453125, 266.4013977050781, 149.83399963378906, 66.60400390625, 16.647491455078125],
+    10: [998.9994506835938, 832.4999389648438, 699.30224609375, 566.0985107421875, 432.9044189453125, 299.7054443359375, 199.80447387695312, 116.55728912353516, 49.96816635131836, 16.647491455078125],
+    11: [998.9994506835938, 849.1502685546875, 732.6011962890625, 599.3961791992188, 482.8583984375, 366.30621337890625, 266.4013977050781, 166.52090454101562, 99.89759063720703, 49.96816635131836, 16.647491455078125]
+  }
+  if num_inference_steps not in ts_schedules:
+    timesteps = _loglinear_interp(ts_schedules[11], num_inference_steps)
+  else:
+    timesteps = ts_schedules[num_inference_steps]
+  return timesteps
+
+
+
+
+
+  ays_ts_10 = np.array([999, 845, 730, 587, 443, 310, 193, 116, 53, 13])
+  new_ts = _loglinear_interp(ays_ts_10, num_inference_steps)
+  return new_ts.round().astype(int)
+
+def _loglinear_interp(t_steps, num_steps):
+  xs = np.linspace(0, 1, len(t_steps))
+  ys = np.log(t_steps[::-1])
+  new_xs = np.linspace(0, 1, num_steps)
+  new_ys = np.interp(new_xs, xs, ys)
+  interped_ys = np.exp(new_ys)[::-1].copy()
+  return interped_ys
+
 
 
 # =============================================================================
@@ -246,17 +294,21 @@ def wandb_log_ts(t_steps, global_step=None, key=None, xlabel="NFE", ylabel="TS")
   wandb_log_fig(fig=fig, key=key, global_step=global_step)
 
 def wandb_log_imgs(imgs_student, imgs_teacher, global_step=None, key=None):
-  fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-  vis_grid(imgs_student, ax=ax[0])
-  ax[0].axis('off')
-  ax[0].set_title("Student")
+  n_cols = 2 if imgs_teacher is not None else 1
+  fig, ax = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5))
+  axes = ax if isinstance(ax, (list, np.ndarray)) else [ax]
 
-  vis_grid(imgs_teacher, ax=ax[1])
-  ax[1].axis('off')
-  ax[1].set_title("Teacher")
-  if global_step is None: return
+  vis_grid(imgs_student, ax=axes[0])
+  axes[0].axis('off')
+  axes[0].set_title("Student")
 
-  wandb_log_fig(fig=fig, key=key, global_step=global_step)
+  if imgs_teacher is not None:
+    vis_grid(imgs_teacher, ax=axes[1])
+    axes[1].axis('off')
+    axes[1].set_title("Teacher")
+
+  if global_step is not None:
+    wandb_log_fig(fig=fig, key=key, global_step=global_step)
 
 def vis_grid(imgs_row, ax=None):
   imgs_row = imgs_row.detach().cpu()

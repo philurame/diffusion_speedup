@@ -1,11 +1,10 @@
 from lib.registries import model_registry
-from lib.models.sdxl import BaseSDXL
+from lib.models.SD15.sd15 import BaseSD15
 import torch
 import torch.utils.checkpoint as cp
 
-
-@model_registry.add_to_registry('SDXL_TRAIN')
-class TrainSDXL(BaseSDXL):
+@model_registry.add_to_registry('SD15_TRAIN')
+class TrainSD15(BaseSD15):
   @classmethod
   def from_pretrained(self, *args, **kwargs):
     kwargs.pop('half', None)
@@ -27,7 +26,7 @@ class TrainSDXL(BaseSDXL):
       timestep_cond=None,
       cross_attention_kwargs=None,
       return_dict=False,
-      encoder_hidden_states=unet_kwargs['encoder_hidden_states'],
+      encoder_hidden_states=self.prompt_embeds,
       added_cond_kwargs=unet_kwargs['added_cond_kwargs'],
     )[0]
 

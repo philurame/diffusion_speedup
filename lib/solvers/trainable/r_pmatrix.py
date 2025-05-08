@@ -1,9 +1,9 @@
 from lib.registries import solver_registry
-from lib.solvers.trainable.set_deis import SETDEIS2
+from lib.solvers.trainable.set_solver import SETSOLVER
 import torch
 
 @solver_registry.add_to_registry("PMATRIX")
-class PMATRIX(SETDEIS2):
+class PMATRIX(SETSOLVER):
   order = 3
   is_trainable = True
   def step(self, model_output, sample=None, **kwargs):

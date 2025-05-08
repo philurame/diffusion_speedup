@@ -14,7 +14,7 @@ def seed_everything(seed=42):
 @torch.inference_mode()
 def generate(pipe, anns, nfe=None, timesteps=None, batch_size=16, save_path=None):
   device = pipe.device
-  latents_gen = torch.zeros((len(anns), 4, 128, 128), dtype=torch.float16, device=device)
+  latents_gen = torch.zeros((len(anns), *pipe.latent_dims), dtype=torch.float16, device=device)
   dataloader  = torch.utils.data.DataLoader(anns, batch_size=batch_size, shuffle=False, num_workers=0)
   
   seed_everything(42)
@@ -24,7 +24,6 @@ def generate(pipe, anns, nfe=None, timesteps=None, batch_size=16, save_path=None
       prompts, 
       num_inference_steps=nfe,
       timesteps=timesteps,
-      guidance_scale=5,
       generator=generators,
       output_type='latent'
     )
@@ -37,13 +36,13 @@ def generate(pipe, anns, nfe=None, timesteps=None, batch_size=16, save_path=None
 @torch.inference_mode()
 def decode_vae(pipe, latents, batch_size=1):
   device = pipe.device
-  needs_upcasting = pipe.vae.dtype == torch.float16 and pipe.vae.config.force_upcast
+  needs_upcasting = pipe.img_dims[-1]==1024 and pipe.vae.dtype == torch.float16 and pipe.vae.config.force_upcast
   if needs_upcasting:
     pipe.upcast_vae()
     latents = latents.to(next(iter(pipe.vae.post_quant_conv.parameters())).dtype)
     
   latents = latents / pipe.vae.config.scaling_factor
-  imgs = torch.zeros(latents.shape[0], 3, 1024, 1024, dtype=torch.uint8, device='cpu')
+  imgs = torch.zeros(latents.shape[0], *pipe.img_dims, dtype=torch.uint8, device='cpu')
 
   for i in tqdm(range(0, latents.shape[0], batch_size), total=len(latents)//batch_size, desc='decode...'):
     decoded_latents = pipe.vae.decode(latents[i:i+batch_size].to(device), return_dict=False)[0]
@@ -53,6 +52,7 @@ def decode_vae(pipe, latents, batch_size=1):
     pipe.vae.to(dtype=torch.float16)
 
   return imgs
+  
 
 
 
@@ -63,7 +63,7 @@ def generate_part(pipe, anns, nfe=None, timesteps=None, batch_size=16, save_path
 
   anns_subset = anns[i_from:i_to]
   subset_size = len(anns_subset)
-  latents_gen = torch.zeros((subset_size, 4, 128, 128), dtype=torch.float16, device=device)
+  latents_gen = torch.zeros((subset_size, *pipe.latent_dims), dtype=torch.float16, device=device)
   dataloader = torch.utils.data.DataLoader(anns_subset, batch_size=batch_size, shuffle=False, num_workers=0)
 
   seed_everything(42)

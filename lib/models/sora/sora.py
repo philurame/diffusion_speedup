@@ -3,7 +3,6 @@ from transformers import AutoTokenizer, MT5EncoderModel
 
 from diffusers.utils.torch_utils import randn_tensor
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
-from opensora.models.diffusion.opensora_v1_3.modeling_opensora import OpenSoraT2V_v1_3
 
 SORA_PATH = os.path.dirname(os.path.abspath(__file__))
 DIFF_PATH = os.path.dirname( # DIFFUSION_SPEEDUP
@@ -11,10 +10,10 @@ DIFF_PATH = os.path.dirname( # DIFFUSION_SPEEDUP
     os.path.dirname(SORA_PATH) # models
   )
 )
-
 FILES_PATH = os.path.join(DIFF_PATH, "DATA", "SORA_FILES")
 sys.path.append(os.path.join(SORA_PATH, "Open-Sora-Plan"))
 
+from opensora.models.diffusion.opensora_v1_3.modeling_opensora import OpenSoraT2V_v1_3
 from opensora.models.causalvideovae import ae_stride_config, ae_wrapper
 
 
@@ -70,6 +69,7 @@ class BaseSora(DiffusionPipeline):
     #   vae.vae.t_chunk_dec = vae.vae.t_chunk_enc // 2
   
     pipe.scheduler_config = {
+      "model_path_name": "",
       "num_train_timesteps": 1000,
       "beta_start": 0.0001,
       "beta_end": 0.02,
@@ -383,3 +383,11 @@ class BaseSora(DiffusionPipeline):
       latents = latents.to(device)
     latents = latents * self.scheduler.init_noise_sigma
     return latents
+  
+  def save_video(self, video, p_to):
+    import imageio
+    imageio.mimwrite(f'{p_to}.mp4', 
+        video.squeeze(),
+        fps=18, 
+        quality=10
+      )

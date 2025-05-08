@@ -1,9 +1,9 @@
 from lib.registries import solver_registry
-from lib.solvers.trainable.set_deis import SETDEIS2
+from lib.solvers.trainable.set_solver import SETSOLVER
 import torch
 
 @solver_registry.add_to_registry("COEFMATRIX1")
-class COEFMATRIX1(SETDEIS2):
+class COEFMATRIX1(SETSOLVER):
   order = 3
   is_trainable = True
   def step(self, model_output, sample=None, **kwargs):
@@ -45,7 +45,7 @@ class COEFMATRIX2(COEFMATRIX1):
 
 
 @solver_registry.add_to_registry("COEFMATRIXSHARED1")
-class COEFMATRSHARED1(SETDEIS2):
+class COEFMATRSHARED1(SETSOLVER):
   order = 3
   is_trainable = True
   def step(self, model_output, sample=None, **kwargs):

@@ -1,11 +1,10 @@
 from lib.registries import model_registry
-from lib.models.sdxl import BaseSDXL
+from lib.models.SD14.sd14 import BaseSD14
 import torch
 import torch.utils.checkpoint as cp
 
-
-@model_registry.add_to_registry('SDXL_TRAIN')
-class TrainSDXL(BaseSDXL):
+@model_registry.add_to_registry('SD14_TRAIN')
+class TrainSD14(BaseSD14):
   @classmethod
   def from_pretrained(self, *args, **kwargs):
     kwargs.pop('half', None)

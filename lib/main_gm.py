@@ -1,4 +1,4 @@
-import wandb, click
+import wandb, click, tqdm
 import torch, os, sys, gc
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # DIFFUSION_SPEEDUP
@@ -45,6 +45,17 @@ def calc_metrics(metric_names, **data):
     torch.cuda.empty_cache()
   return res_metrics
 
+def seed_everything(seed=42):
+  import random
+  import numpy as np
+  import torch
+  random.seed(seed)
+  np.random.seed(seed)
+  torch.manual_seed(seed)
+  torch.cuda.manual_seed_all(seed)
+  torch.backends.cudnn.deterministic = True
+  torch.backends.cudnn.benchmark = False
+
 ##########################################################################################
 # MAIN
 ##########################################################################################
@@ -82,6 +93,8 @@ def main(**kwargs):
     path_ddim_200 = os.path.join(data_path, 'imgs_ddim200_224.pt')
   elif dataset == 'COCO30':
     path_ddim_200 = os.path.join(data_path, 'imgs30_DDIM200_224.pt')
+  else:
+    path_ddim_200 = ''
 
   print(
     '\n'+'#'*50, 
@@ -90,10 +103,6 @@ def main(**kwargs):
     '#'*50+'\n', sep='\n'
   )
   sys.stdout.flush()
-
-  if not os.path.exists(save_path):
-    print('path does not exist!')
-    sys.exit(0)
   
   # wandb.login(key=key, relogin=True)
   # api = wandb.Api()
@@ -102,15 +111,30 @@ def main(**kwargs):
   #   sys.exit(0)
 
   data = data_registry[dataset](data_path, max_samples)
+  
+  if solver not in solver_registry:
+    print('SLOVER NOT IN REGISTRY, REPLACING WITH DDIM')
+    solver = 'DDIM'
   pipe = construct_pipeline(solver, scheduler, model_name, half=True, device=device)
+  solver = kwargs['solver']
   
   ########################################
-  # METRICS
+  # GM
   ########################################
+  N = len(data.anns)
+  gen_imgs = torch.zeros(N, *pipe.img_dims, dtype=torch.uint8, device='cpu')
 
-  gen_latents = torch.load(save_path, map_location='cpu')[:max_samples]
-  gen_imgs = decode_vae(pipe, gen_latents, batch_size=batch_size)
-  del gen_latents
+  seed_everything(42)
+  for i in tqdm.tqdm(range(0, N, batch_size), total=N//batch_size, desc='generate+decode...'):
+    prompts_batch = data.anns[i:i+batch_size]
+    generators = [torch.Generator(device='cpu').manual_seed(i+g) for g in range(len(prompts_batch))]
+    imgs = pipe(
+      prompts_batch, 
+      num_inference_steps=nfe,
+      generator=generators,
+      output_type='img'
+    )
+    gen_imgs[i:i+batch_size] = imgs
   
   gc.collect()
   torch.cuda.empty_cache()

@@ -7,8 +7,6 @@ import time, torch, wandb, tqdm, torch.optim as optim, pickle, gc
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 import torchvision, open_clip
 
-from adversarial_utils import LADD
-
 
 class Trainer:
   # ==================================================================================================================
@@ -18,16 +16,15 @@ class Trainer:
     seed_everything(42)
 
     self.config = config
-
-    init_solver = self.config.init_solver if self.config.train_solver else None
-    self.pipe = construct_pipeline(self.config.solver, 'CUSTOM', self.config.model, is_train=True, device=self.config.device, init_solver=init_solver)
-
     print(f"init data...", flush=True)
     self._init_data()
     print(f"init metrics...", flush=True)
     self._init_metrics()
     self._init_timestemps()
     self._init_other()
+
+    init_solver = self.config.init_solver if self.config.train_solver else None
+    self.pipe = construct_pipeline(self.config.solver, 'CUSTOM', self.config.model, is_train=True, device=self.config.device, init_solver=init_solver)
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -47,9 +44,6 @@ class Trainer:
     if self.config.train_solver:
       self.pipe.scheduler.set_train_solver(timesteps=self.timesteps, device=self.config.device)
       train_params.append({"params": self.pipe.scheduler.train_params, "lr": self.config.lr_solv})
-    
-    if self.config.loss == 'LATENT-ADD':
-      train_params.append({"params": self.ladd_model.disc.parameters(), "lr": self.config.lr_ladd})
 
     self.optimizer = optim.Adam(train_params)
     self.global_step = 0
@@ -98,17 +92,7 @@ class Trainer:
     self.train_teacher_features = {}
     self.val_teacher_features   = {}
 
-    # # LADD
-    if 'LATENT-ADD' in self.config.loss:
-      ladd_config = self.pipe.scheduler_config
-      self.ladd_model = LADD(config=ladd_config, device=self.config.device)
-
-    # LPIPS
-    if self.config.decode_imgs:
-      self.lpips_model = LearnedPerceptualImagePatchSimilarity(net_type='vgg').net.to(self.config.device)    
-      with torch.no_grad():
-        self.train_teacher_features['LPIPS'] = lpips_features_batch(self.train_teacher_imgs, self.lpips_model)
-        self.val_teacher_features['LPIPS']   = lpips_features_batch(self.val_teacher_imgs,   self.lpips_model)
+    # # ADV
 
     # # INCEPTION
     # if self.config.decode_imgs:
@@ -120,6 +104,13 @@ class Trainer:
     #   with torch.no_grad():
     #     self.train_teacher_features['INC'] = inc_features_batch(self.train_teacher_imgs, self.inception_model)
     #     self.val_teacher_features['INC']   = inc_features_batch(self.val_teacher_imgs,   self.inception_model)
+
+    # LPIPS
+    if self.config.decode_imgs:
+      self.lpips_model = LearnedPerceptualImagePatchSimilarity(net_type='vgg').net.to(self.config.device)    
+      with torch.no_grad():
+        self.train_teacher_features['LPIPS'] = lpips_features_batch(self.train_teacher_imgs, self.lpips_model)
+        self.val_teacher_features['LPIPS']   = lpips_features_batch(self.val_teacher_imgs,   self.lpips_model)
 
     # # CLIP
     # if self.config.decode_imgs:
@@ -219,39 +210,18 @@ class Trainer:
         losses = self.get_train_loss(gen_latents, gen_imgs, start_idx, end_idx)
         loss = losses[self.config.loss] / effective_batch_size
 
+        # if self.config.train_adversarial:
+
         loss.backward()
 
         for k, v in losses.items():
           train_losses[k] = train_losses.get(k,0) + v.item()
           batch_losses[k] = batch_losses.get(k,0) + v.item()
-
-      # TRAIN DISC
-      if self.config.loss == 'LATENT-ADD':
-        trds = self.train_teacher_latents_out.shape[0]
-        start_idx = trds - (batch_start + self.config.batch_size)
-        end_idx   = trds - batch_start
-
-        prompts = self.train_prompts[start_idx:end_idx]
-        teacher_latents_out = self.train_teacher_latents_out[start_idx:end_idx]
-        latents = self.train_latents[start_idx:end_idx].to(self.config.device)
-        bsz = teacher_latents_out.shape[0]
-        with torch.no_grad():
-          student_latents_out = self.pipe(prompt=prompts, timesteps=self.timesteps, unet_timesteps=self.unet_timesteps, latents=latents, output_type='latent')
-
-        loss_gen, loss_real = loss_registry['LATENT-ADD-D'](ladd_model = self.ladd_model, student_latents_out=student_latents_out, teacher_latents_out=teacher_latents_out, prompt_embeds=self.pipe.prompt_embeds)
-        batch_losses['LATENT-ADD-Dgen']  = loss_gen.item()  * effective_batch_size
-        batch_losses['LATENT-ADD-Dreal'] = loss_real.item() * effective_batch_size
-
-        train_losses['LATENT-ADD-Dgen']  = train_losses.get('LATENT-ADD-Dgen', 0)  + loss_gen.item()  * bsz
-        train_losses['LATENT-ADD-Dreal'] = train_losses.get('LATENT-ADD-Dreal', 0) + loss_real.item() * bsz
-
-        d_loss = (loss_gen+loss_real) * 0.5
-        d_loss.backward()
-    
+        
       log_dict = {f'train/batch_{k}': v / effective_batch_size for k, v in batch_losses.items()}
       self.log_clip_grad_step(log_dict)
 
-      # RELAXED X_t
+      # optimization of relaxed x_t
       if self.config.relax_radius > 0: self._optimize_relax(latents_batch_relax, batch_start)
 
     for k in train_losses:
@@ -267,18 +237,20 @@ class Trainer:
 
     with torch.set_grad_enabled('LATENT-L1' == self.config.loss):
       losses['LATENT-L1'] = loss_registry['LATENT-L1'](student_latents_out=gen_latents, teacher_latents_out=teacher_latents_out)
-    
 
     if self.config.decode_imgs:
       teacher_imgs = self.train_teacher_imgs[start_idx:end_idx]
 
       with torch.set_grad_enabled('L1' == self.config.loss):
-        losses['L1'] = loss_registry['L1'](student_imgs=gen_imgs, teacher_imgs=teacher_imgs)
+          losses['L1'] = loss_registry['L1'](student_imgs=gen_imgs, teacher_imgs=teacher_imgs)
       
       with torch.set_grad_enabled('LPIPS' == self.config.loss):
-        loss_model = self.lpips_model
-        teacher_features = tuple(i[start_idx:end_idx] for i in self.train_teacher_features['LPIPS'])
-        losses['LPIPS'] = loss_registry['LPIPS'](student_imgs=gen_imgs, teacher_imgs=teacher_imgs, teacher_features=teacher_features, loss_model=loss_model)
+          loss_model = self.lpips_model
+          teacher_features = tuple(i[start_idx:end_idx] for i in self.train_teacher_features['LPIPS'])
+          losses['LPIPS'] = loss_registry['LPIPS'](student_imgs=gen_imgs, teacher_imgs=teacher_imgs, teacher_features=teacher_features, loss_model=loss_model)
+
+      # with torch.set_grad_enabled('ADV?' == self.config.loss):
+      #   ?
 
       # with torch.set_grad_enabled('CLIP' == self.config.loss):
       #   loss_model = self.clip_model
@@ -289,20 +261,6 @@ class Trainer:
       #   loss_model = self.inception_model
       #   teacher_features = self.train_teacher_features['INC'][start_idx:end_idx]
       #   losses['INC'] = loss_registry['INC'](student_imgs=gen_imgs, teacher_imgs=teacher_imgs, teacher_features=teacher_features, loss_model=loss_model)
-    
-    if self.config.loss == 'LATENT-ADD':
-      with torch.set_grad_enabled('LATENT-ADD' == self.config.loss):
-        prompt_embeds = self.pipe.prompt_embeds
-        adv_kwargs = {}
-        if self.config.recon_loss_type == 'L1':
-          adv_kwargs['student_imgs'] = gen_imgs
-          adv_kwargs['teacher_imgs'] = teacher_imgs
-        recon_loss_type = self.config.recon_loss_type
-        adv_loss, recon_loss = loss_registry['LATENT-ADD-G'](ladd_model = self.ladd_model, student_latents_out=gen_latents, teacher_latents_out=teacher_latents_out, prompt_embeds=prompt_embeds, recon_loss_type=recon_loss_type, **adv_kwargs)
-        losses['LATENT-ADD-Gadv'] = adv_loss
-        losses['LATENT-ADD-Grec'] = recon_loss
-        losses['LATENT-ADD'] = recon_loss + self.config.adv_lambda * adv_loss
-
       
     return losses
 
@@ -351,7 +309,6 @@ class Trainer:
     teacher_latents_out = self.val_teacher_latents_out[start_idx:end_idx].to(self.config.device)    
     losses['LATENT-L1'] = loss_registry['LATENT-L1'](student_latents_out=gen_latents, teacher_latents_out=teacher_latents_out)
 
-
     if self.config.decode_imgs:
       teacher_imgs = self.val_teacher_imgs[start_idx:end_idx]
       
@@ -368,23 +325,6 @@ class Trainer:
       # loss_model = self.inception_model
       # teacher_features = self.val_teacher_features['INC'][start_idx:end_idx]
       # losses['INC'] = loss_registry['INC'](student_imgs=gen_imgs, teacher_imgs=teacher_imgs, teacher_features=teacher_features, loss_model=loss_model)
-    
-
-    if self.config.loss == 'LATENT-ADD':
-      prompt_embeds = self.pipe.prompt_embeds
-      adv_kwargs = {}
-      if self.config.recon_loss_type == 'L1':
-        adv_kwargs['student_imgs'] = gen_imgs
-        adv_kwargs['teacher_imgs'] = teacher_imgs
-      recon_loss_type=self.config.recon_loss_type
-      adv_loss, recon_loss = loss_registry['LATENT-ADD-G'](ladd_model = self.ladd_model, student_latents_out=gen_latents, teacher_latents_out=teacher_latents_out, prompt_embeds=prompt_embeds, recon_loss_type=recon_loss_type, **adv_kwargs)
-      losses['LATENT-ADD-Gadv'] = adv_loss
-      losses['LATENT-ADD-Grec'] = recon_loss
-      losses['LATENT-ADD'] = recon_loss + self.config.adv_lambda * adv_loss
-      
-      loss_gen, loss_real = loss_registry['LATENT-ADD-D'](ladd_model = self.ladd_model, student_latents_out=gen_latents, teacher_latents_out=teacher_latents_out, prompt_embeds=prompt_embeds)
-      losses['LATENT-ADD-Dgen']  = loss_gen
-      losses['LATENT-ADD-Dreal'] = loss_real
 
     return losses
 
@@ -422,16 +362,6 @@ class Trainer:
           log_dict.update({f'solv/grad_std_nfe[{n}]': p.std().item()})
       else: # it is generator:
         params_to_clip.extend(list(self.pipe.scheduler.train_params))
-    
-    if self.config.loss == 'LATENT-ADD':
-      params_to_clip.extend(self.ladd_model.disc.parameters())
-      grads = torch.stack([p.grad.norm(2) for p in self.ladd_model.disc.parameters()])
-      log_dict['grad_general/ladd_grad_norm'] = grads.norm(2).item()
-      log_dict['grad_general/ladd_grad_norm'] = grads.norm(2).item()
-      log_dict['grad_general/ladd_grad_mean'] = grads.mean().item()
-      log_dict['grad_general/ladd_grad_90%']  = grads.abs().quantile(0.9).item()
-      log_dict['grad_general/ladd_grad_std']  = grads.std().item()
-      
         
     self.global_step += 1
     wandb.log(log_dict, step=self.global_step)
@@ -531,7 +461,7 @@ class Trainer:
     metrics_path = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/lib/metrics'
     if metrics_path not in sys.path: sys.path.insert(0, metrics_path)
     from r_fid  import FID1Metric
-    # from r_clip import CLIPMetric
+    from r_clip import CLIPMetric
     metric_data = dict(
       imgs_gen=imgs_gen, 
       imgs_real=imgs_real, 
@@ -540,21 +470,13 @@ class Trainer:
     )
     res_metrics = {
       'metrics/FID':  FID1Metric()(**metric_data),
-      # 'metrics/CLIP': CLIPMetric()(**metric_data)
+      'metrics/CLIP': CLIPMetric()(**metric_data)
     }
     self.FID = res_metrics['metrics/FID']
     
     wandb.log(res_metrics, step=self.global_step)
-
-    # imgs_log = torch.nn.functional.interpolate(imgs_gen[:4], size=(224, 224), mode='bilinear', align_corners=False).squeeze().cpu()
-
-    # wandb_log_imgs(
-    #   imgs_student=imgs_log, 
-    #   imgs_teacher=None, 
-    #   key="metrics-img",
-    #   global_step=self.global_step,
-    # )
       
+
 
 
 
@@ -575,6 +497,7 @@ class Trainer:
         with open(os.path.join(proj_loss_dir, wandb.run.name + '.pkl'), 'wb') as f:
           pickle.dump(self.pipe.scheduler.train_params, f)
 
+  
   def update_graph(self):
     if self.config.train_timesteps:
       self.timesteps = self.ts_param(self.ts_logits)
@@ -582,16 +505,16 @@ class Trainer:
       self.unet_timesteps = self.ts_param(self.uts_logits)   
   
 
-  # def _optimize_relax(self, latents_batch_relax, batch_start):
-  #   ''' optimize x_T' with projected gradient descent '''
-  #   with torch.no_grad():
-  #     grad_latents_batch_relax = latents_batch_relax.grad
-  #     latents_batch_relax  = latents_batch_relax - self.config.lr_r * grad_latents_batch_relax
-  #     # project back to ball centered at x_T
-  #     for i in range(len(latents_batch_relax)):
-  #       diff = latents_batch[i] - latents_batch_relax[i]
-  #       norm = torch.norm(diff, p=2)
-  #       radius = self.config.relax_radius # 0.001 * d / nfe**2 >> 0.05
-  #       if norm > radius: # project back to the ball's surface
-  #         latents_batch_relax[i] = latents_batch[i] + diff * (radius / norm)
-  #       self.train_latents_relax[batch_start + i] = latents_batch_relax[i]
+  def _optimize_relax(self, latents_batch_relax, batch_start):
+    ''' optimize x_T' with projected gradient descent '''
+    with torch.no_grad():
+      grad_latents_batch_relax = latents_batch_relax.grad
+      latents_batch_relax  = latents_batch_relax - self.config.lr_r * grad_latents_batch_relax
+      # project back to ball centered at x_T
+      for i in range(len(latents_batch_relax)):
+        diff = latents_batch[i] - latents_batch_relax[i]
+        norm = torch.norm(diff, p=2)
+        radius = self.config.relax_radius # 0.001 * d / nfe**2 >> 0.05
+        if norm > radius: # project back to the ball's surface
+          latents_batch_relax[i] = latents_batch[i] + diff * (radius / norm)
+        self.train_latents_relax[batch_start + i] = latents_batch_relax[i]

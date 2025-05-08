@@ -1,20 +1,19 @@
 import torch
-from diffusers import StableDiffusionXLPipeline
+from diffusers import StableDiffusionPipeline
 
-class BaseSDXL(StableDiffusionXLPipeline):
+class BaseSD14(StableDiffusionPipeline):
   @classmethod
   def from_pretrained(cls, *args, **kwargs):
     half = kwargs.get('half', True)
     device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
     pipe = super().from_pretrained(
-      "stabilityai/stable-diffusion-xl-base-1.0", 
+      "CompVis/stable-diffusion-v1-4", 
       torch_dtype=torch.float16 if half else torch.float32,
-      variant="fp16" if half else None,
+      revision="fp16" if half else None,
       local_files_only=True # use True for HSE cluster
     ).to(device)
-    if not half: pipe.text_encoder_2.to(torch.float32)
     pipe.scheduler_config = {
-      "model_path_name": "stabilityai/stable-diffusion-xl-base-1.0",
+      "model_path_name": "CompVis/stable-diffusion-v1-4",
       "num_train_timesteps": 1000,
       "beta_start": 0.00085,
       "beta_end": 0.012,
@@ -22,8 +21,8 @@ class BaseSDXL(StableDiffusionXLPipeline):
       "init_noise_sigma": 1.0
     }
     pipe.is_train = kwargs.get('is_train', False)
-    pipe.latent_dims = (4, 128, 128)
-    pipe.img_dims    = (3, 1024, 1024)
+    pipe.latent_dims = (4, 64, 64)
+    pipe.img_dims    = (3, 512, 512)
     return pipe
   
   def __call__(self, *args, **kwargs):
@@ -37,6 +36,8 @@ class BaseSDXL(StableDiffusionXLPipeline):
     num_inference_steps: int = 50,
     timesteps = None,
     output_type="latent",
+    height = None, 
+    width = None,
     **kwargs
     ):
     '''
@@ -44,75 +45,60 @@ class BaseSDXL(StableDiffusionXLPipeline):
     scheduler must be combined with solver first!
     '''
     device = kwargs.get('device') or self._execution_device
-    guidance_scale = kwargs.get('guidance_scale', 5)
+    guidance_scale = kwargs.get('guidance_scale', 7.5)
     do_classifier_free_guidance = guidance_scale>0
+    generator = kwargs.get("generator", None)
 
-    # Prepare text embeddings
-    ( 
-      prompt_embeds,
-      negative_prompt_embeds,
-      pooled_prompt_embeds,
-      negative_pooled_prompt_embeds,
-    ) = self.encode_prompt(prompt, device=device)
+    if not height or not width:
+      _is_unet_config_sample_size_int = isinstance(self.unet.config.sample_size, int)
+      height = (
+        self.unet.config.sample_size if _is_unet_config_sample_size_int else self.unet.config.sample_size[0]
+      )
+      width = (
+        self.unet.config.sample_size if _is_unet_config_sample_size_int else self.unet.config.sample_size[1]
+      )
+      height, width = height * self.vae_scale_factor, width * self.vae_scale_factor
 
-    # generated height, width (should better use 1024 or >=512)
-    height = kwargs.get('height', self.default_sample_size * self.vae_scale_factor)
-    width  = kwargs.get('width',  self.default_sample_size * self.vae_scale_factor)
+    prompt_embeds, negative_prompt_embeds = self.encode_prompt(
+      prompt,
+      device,
+      num_images_per_prompt=1,
+      do_classifier_free_guidance=do_classifier_free_guidance,
+      negative_prompt=kwargs.get("negative_prompt", None),
+      prompt_embeds=kwargs.get("prompt_embeds", None),
+      negative_prompt_embeds=kwargs.get("negative_prompt_embeds", None),
+      lora_scale=None,
+      clip_skip=None,
+    )
 
     batch_size = 1 if isinstance(prompt, str) else len(prompt)
-
-    # Create initial noise
     latents = self.prepare_latents(
       batch_size = batch_size,
       num_channels_latents=self.unet.config.in_channels,
       height=height,
       width=width,
-      dtype=prompt_embeds.dtype,
       device=device,
-      generator=kwargs.get("generator", None),
+      dtype=prompt_embeds.dtype,
+      generator=generator,
       latents=kwargs.get("latents", None),
-    )
+    ) 
 
-    # 4. Prepare timesteps
     timesteps, num_inference_steps = self.retrieve_timesteps(
       num_inference_steps, 
       device, 
       timesteps, 
       **kwargs
     )
-    
-    # 7. Prepare added time ids & embeddings
-    add_text_embeds = pooled_prompt_embeds
-    if self.text_encoder_2 is None:
-      text_encoder_projection_dim = int(pooled_prompt_embeds.shape[-1])
-    else:
-      text_encoder_projection_dim = self.text_encoder_2.config.projection_dim
-
-    add_time_ids = self._get_add_time_ids(
-      original_size=kwargs.get('original_size', (height, width)),
-      crops_coords_top_left=kwargs.get('crops_coords_top_left', (0,0)),
-      target_size=(height, width),
-      dtype=prompt_embeds.dtype,
-      text_encoder_projection_dim=text_encoder_projection_dim,
-    )
-    negative_add_time_ids = add_time_ids
 
     if do_classifier_free_guidance:
-      prompt_embeds   = torch.cat([negative_prompt_embeds,        prompt_embeds],   dim=0)
-      add_text_embeds = torch.cat([negative_pooled_prompt_embeds, add_text_embeds], dim=0)
-      add_time_ids    = torch.cat([negative_add_time_ids,         add_time_ids],    dim=0)
-
-    prompt_embeds   = prompt_embeds.to(device)
-    add_text_embeds = add_text_embeds.to(device)
-    add_time_ids    = add_time_ids.to(device).repeat(batch_size, 1)   
+      prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds], dim=0).to(device)
 
     # Diffusion steps
     for i, t in enumerate(timesteps):
-      # print(latents.sum(), t)
       latents = self.make_unet_solver_step(
-        self.scheduler, latents, t, guidance_scale, generator=kwargs.get("generator", None),
+        self.scheduler, latents, t, guidance_scale, generator=generator,
         encoder_hidden_states=prompt_embeds,
-        added_cond_kwargs={"text_embeds": add_text_embeds, "time_ids": add_time_ids},
+        added_cond_kwargs={},
         )
     
     if output_type == "latent":
@@ -166,14 +152,6 @@ class BaseSDXL(StableDiffusionXLPipeline):
     return timesteps, num_inference_steps
   
   def decode_latents(self, latents):
-    needs_upcasting = self.vae.dtype == torch.float16 and self.vae.config.force_upcast
-    if needs_upcasting:
-      self.upcast_vae()
-      latents = latents.to(next(iter(self.vae.post_quant_conv.parameters())).dtype)
-    latents = latents / self.vae.config.scaling_factor
-    imgs = self.vae.decode(latents, return_dict=False)[0]
-    imgs_pt = self.image_processor.postprocess(imgs, output_type='pt')
-    if needs_upcasting:
-      self.vae.to(dtype=torch.float16)
+    imgs_pt = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=None)[0]
+    imgs_pt = self.image_processor.postprocess(imgs_pt, output_type='pt') #do_denormalize=[True]*imgs_pt.shape[0]
     return imgs_pt
-  

@@ -95,9 +95,15 @@ def unet_forward(
 
 
 class Discriminator(nn.Module):
-  def __init__(self, pretrained_path):
+  def __init__(self, pretrained_path, freeze=True):
     super().__init__()
     self.unet = UNet2DConditionModel.from_pretrained(pretrained_path, subfolder="unet")
+    
+    if freeze:
+      for p in self.unet.parameters():
+        p.requires_grad_(False)
+
+
     self.unet.forward = unet_forward
     self.unet.up_blocks = None
     self.unet.conv_out = None
@@ -131,11 +137,8 @@ class Discriminator(nn.Module):
       cur_out = cur_head(cur_feat)
       res_list.append(cur_out.reshape(cur_out.shape[0], -1))
   
-    concat_res = torch.cat(res_list, dim=1)
-
-    # # SPLIT-CONCAT UNCOND AND COND INTO BATCH
-    # concat_res = torch.cat(concat_res.chunk(2), dim=1)
-    return concat_res
+    res = torch.cat(res_list, dim=1).sum(dim=1)
+    return res.view(res.shape[0])
 
   def save_pretrained(self, path):
     torch.save(self.state_dict(), path)

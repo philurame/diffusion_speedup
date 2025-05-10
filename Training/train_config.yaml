@@ -1,0 +1,38 @@
+
+nfe: 4
+loss: LATENT-ADV
+model: SD15_TRAIN
+calc_metrics_epoch: 1
+img_log_interval: 1
+epochs: 400
+
+adv:
+  lambda: 1
+  lr: 0.001
+  gamma: 0.2
+  path: ''
+
+solver:
+  train: true
+  solver: COEFEXT2
+  init: UNIPC2H
+  teacher: UNIPC2H_6
+  lr: 0.001
+
+timesteps:
+  train: true
+  lr: 0.001
+  start_method: linear
+  param_method: square
+
+unet_timesteps:
+  train: true
+  lr: 0.001
+
+dataset:
+  train_size: 1000
+  batch_size: 10
+  mini_batch_size: 10
+  val_size: 100
+  val_batch_size: 1
+  path: /workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA

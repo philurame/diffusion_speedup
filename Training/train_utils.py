@@ -189,89 +189,52 @@ def _loglinear_interp(t_steps, num_steps):
 # =============================================================================
 # LPIPS
 # =============================================================================
-def lpips(imgs1, imgs2, lpips_net):
-  m, M = min(imgs1.min(), imgs2.min()), max(imgs1.max(), imgs2.max())
-  if m >= -0.01 and M < 2: # [0, 1]
-    imgs1 = imgs1 * 2 - 1
-    imgs2 = imgs2 * 2 - 1
-  elif m >= -0.01: # uint8, [0, 255]
-    imgs1 = imgs1 / 127.5 - 1
-    imgs2 = imgs2 / 127.5 - 1
-  feats1 = get_features(imgs1, lpips_net)
-  feats2 = get_features(imgs2, lpips_net)
-  return get_lpips(feats1, feats2, lpips_net)
+def lpips_normalize(imgs):
+  imgs_norm = torch.nn.functional.interpolate(imgs, size=(224, 224), mode='bilinear', align_corners=False).squeeze()
+  return imgs_norm
 
-def get_features(imgs, lpips_net):
+def lpips_features(imgs, lpips_net):
   device = next(lpips_net.parameters()).device
-  outs_net = lpips_net.net.forward(lpips_net.scaling_layer(imgs.to(device)))
+  imgs_norm = lpips_normalize(imgs).to(device)
+  outs_net = lpips_net.net.forward(lpips_net.scaling_layer(imgs_norm))
 
+  def _normalize_tensor(in_feat, eps=1e-8):
+    return in_feat / torch.sqrt(eps + torch.sum(in_feat**2, dim=1, keepdim=True))
   feats = tuple(_normalize_tensor(feat) for feat in outs_net)
   return feats
 
-def get_lpips(feats1, feats2, lpips_net, reduction='mean'):
+def lpips_features_batch(imgs, lpips_net, bs=100):
+  device = next(lpips_net.parameters()).device
+  lpips_net.to('cpu')
+  feats = []
+  for i in range(0, imgs.size(0), bs):
+    batch = imgs[i : i + bs].to('cpu')
+    feats.append(lpips_features(batch, lpips_net))
+
+  # [(f1a,f2a),(f1b,f2b),(f1c,f2c)] -> [(f1a,f1b,f1c), (f2a,f2b,f2c)]
+  per_layer = list(zip(*feats))
+  # print([layer_feats.shape for layer_feats in per_layer], [layer_feats.device for layer_feats in per_layer])
+  res = tuple(torch.cat(layer_feats, dim=0) for layer_feats in per_layer)
+  lpips_net.to(device)
+  return res
+
+def lpips_features_loss(feats1, feats2, lpips_net, reduction='mean'):
   device = next(lpips_net.parameters()).device
   feats1 = [f.to(device) for f in feats1]
   feats2 = [f.to(device) for f in feats2]
 
-  total_loss = torch.tensor(0.0, device=device)
+  total_loss = []
   for f1, f2, lin in zip(feats1, feats2, lpips_net.lins):
     diff = (f1 - f2)**2
-    total_loss += lin(diff).mean(dim=[2, 3], keepdim=True).sum()
-    
-  if reduction == 'mean':
-    return total_loss / feats1[0].shape[0]
-  elif reduction == 'sum':
+    total_loss.append(lin(diff).mean(dim=[2, 3], keepdim=True).squeeze())
+  total_loss = sum(total_loss)
+
+  if reduction == 'none':
     return total_loss
-
-def _normalize_tensor(in_feat, eps=1e-8):
-  return in_feat / torch.sqrt(eps + torch.sum(in_feat**2, dim=1, keepdim=True))
-
-
-
-
-def get_patched_lpips(imgs1, imgs2, lpips_net, patch_size=128, stride=64, l2_mult=False, reduction='mean'):
-  '''imgs are the teacher imgs'''
-
-  # Rescale imgs1 if needed (same logic as in lpips function)
-  m, M = imgs1.min().item(), imgs1.max().item()
-  if m >= -0.01 and M < 2: # assume [0,1] -> scale to [-1,1]
-    imgs1 = imgs1 * 2 - 1
-    imgs2 = imgs2 * 2 - 1
-  elif m >= -0.01: # assume [0,255] -> scale to [-1,1]
-    imgs1 = imgs1 / 127.5 - 1
-    imgs2 = imgs2 / 127.5 - 1
-
-  B, C, H, W = imgs1.shape
-  # feats2[0] should correspond to the first-layer feature map for the entire teacher image
-  # We'll infer teacher's full H,W from feats2[0], assuming the network did not downsize at the first layer.
-  # If the first layer already has strides, adjust accordingly.
-
-  total_loss = 0.
-  c = 0
-  # Slide over imgs1 in 128x128 patches with stride=64
-  for y in range(0, H - patch_size + 1, stride):
-    for x in range(0, W - patch_size + 1, stride):
-      # Extract patch from imgs1
-      patch1 = imgs1[:, :, y:y+patch_size, x:x+patch_size]
-      patch2 = imgs2[:, :, y:y+patch_size, x:x+patch_size]
-      patch1_224 = torch.nn.functional.interpolate(patch1, size=(224, 224), mode='bilinear')
-      patch2_224 = torch.nn.functional.interpolate(patch2, size=(224, 224), mode='bilinear')
-      # Compute features for this patch
-      feats1 = get_features(patch1_224, lpips_net)
-      feats2 = get_features(patch2_224, lpips_net)
-
-      lpips_val = get_lpips(feats1, feats2, lpips_net, reduction='sum')
-
-      l2_val = 1
-      if l2_mult:
-        l2_val = torch.nn.functional.mse_loss(patch1, patch2, reduction='mean')
-      loss = lpips_val * l2_val
-      total_loss += loss
-      c += 1
-
-  if reduction == 'mean':
-    c *= B
-  return total_loss / c
+  elif reduction == 'sum':
+    return total_loss.sum()
+  elif reduction == 'mean':
+    return total_loss.sum() / feats1[0].shape[0]
 
 
 

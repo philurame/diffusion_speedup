@@ -42,10 +42,6 @@ class Trainer:
     if self.config.solver['train']:
       self.pipe.scheduler.set_train_solver(timesteps=self.timesteps, device=self.config.device)
       train_params.append({"params": self.pipe.scheduler.train_params, "lr": self.config.solver['lr']})
-    
-    if self.config.loss == 'LATENT-ADV':
-      p_train = [p for p in self.ladv_model.Discriminator.parameters() if p.requires_grad]
-      train_params.append({"params": p_train, "lr": self.config.adv['lr']})
 
     self.optimizer = optim.Adam(train_params)
     self.global_step = 0
@@ -93,16 +89,12 @@ class Trainer:
     # LADV
     if self.config.loss == 'LATENT-ADV':
       from ladv_model.ladv_model import DistAdversarialTraining
-
-      ladd_config = self.pipe.scheduler_config
       self.ladv_model = DistAdversarialTraining(local_path=self.config.adv['path'], lr=self.config.adv['lr'], device=self.config.device)
 
     # LADD
     if self.config.loss == 'LATENT-ADD':
       from ladd_model.ladd_model import LADD
-
-      ladd_config = self.pipe.scheduler_config
-      self.ladd_model = LADD(config=ladd_config, device=self.config.device, freeze=self.config.adv['freeze'])
+      self.ladd_model = LADD(config=self.pipe.scheduler_config, device=self.config.device, freeze=self.config.adv['freeze'], lr=self.config.adv['lr'])
 
     # LPIPS
     if self.config.img_log_interval > 0:
@@ -142,7 +134,9 @@ class Trainer:
       
       if self.config.calc_metrics_epoch > 0 and epoch % self.config.calc_metrics_epoch == 0 and epoch:
         self.calc_metrics()
-        self.save_ckpt({'FID': self.FID})
+
+        if self.config.solver['train']:
+          self.save_ckpt({'FID': self.FID})
 
         gc.collect()
         torch.cuda.empty_cache()
@@ -187,8 +181,7 @@ class Trainer:
           gen_imgs = None
 
         losses = self.get_train_losses(gen_latents, gen_imgs, start_idx, end_idx)
-        loss = losses[self.config.loss] / effective_batch_size
-        loss.backward()
+        (losses[self.config.loss]/effective_batch_size).backward()
 
         for k, v in losses.items():
           train_losses[k] = train_losses.get(k,0) + v.item()
@@ -199,19 +192,27 @@ class Trainer:
       self.optimizer.zero_grad()
 
       # DISCRIMINATOR STEP
-      if self.config.loss == 'LATENT-ADV':
+      if self.config.loss in ['LATENT-ADV', 'LATENT-ADD']:
+        if self.config.loss == 'LATENT-ADV':
+          adv_model = self.ladv_model
+          adv_variant = 'ADV'
+        else:
+          adv_model = self.ladd_model
+          adv_variant = 'ADD'
+
         # generate different imgs for discriminator (using teachers samples from the end of the dataset)
-        trsz = self.train_teacher_latents_out.shape[0]
-        start_idx = trsz - (batch_start + batch_size)
-        end_idx   = trsz - batch_start
+        ds_sz = self.train_teacher_latents_out.shape[0]
+        start_idx = ds_sz - (batch_start + effective_batch_size)
+        end_idx   = ds_sz - batch_start
 
         prompts = self.train_prompts[start_idx:end_idx]
         teacher_latents_out = self.train_teacher_latents_out[start_idx:end_idx].to(self.config.device)
         latents = self.train_latents[start_idx:end_idx].to(self.config.device)
-        bsz = teacher_latents_out.shape[0]
+
         with torch.no_grad():
           student_latents_out = []
-          for i in range(bsz): # lets just take batch=1:
+          prompt_embeds = []
+          for i in range(effective_batch_size): # lets just take batch=1:
             student_latents_out.append(
               self.pipe(
                 prompt=prompts[i:i+1], 
@@ -221,26 +222,28 @@ class Trainer:
                 output_type='latent'
               )
             )
+            prompt_embeds.append(self.pipe.prompt_embeds)
           student_latents_out = torch.cat(student_latents_out)
+          prompt_embeds = torch.cat(prompt_embeds)
 
-        loss, stats = loss_registry['LATENT-ADV'](
-          self.ladv_model, student_latents_out, teacher_latents_out, 
+        loss, stats = loss_registry[f'LATENT-{adv_variant}'](
+          adv_model, student_latents_out, teacher_latents_out, 
           phase='DIS', 
           scale=self.config.adv['lambda'], 
           gamma=self.config.adv['gamma'], 
-          is_train=True
+          is_train=True,
+          prompt_embeds=prompt_embeds
         )
+        (loss/effective_batch_size).backward()
 
-        stats['LATENT-ADV-D'] = loss
+        stats[f'LATENT-{adv_variant}-D'] = loss
         for k, v in stats.items():
           train_losses[k] = train_losses.get(k,0) + v.item()
           batch_losses[k] = batch_losses.get(k,0) + v.item()
 
-        (loss/bsz).backward()
-
         log_dict.update(**self.grad_clip_discriminator())
-        self.ladv_model.Opt.step()
-        self.ladv_model.Opt.zero_grad()
+        adv_model.Opt.step()
+        adv_model.Opt.zero_grad()
         
       log_dict.update(**{f'train/batch_{k}': v / effective_batch_size for k, v in batch_losses.items()})
 
@@ -261,24 +264,22 @@ class Trainer:
     with torch.set_grad_enabled('LATENT-L1' == self.config.loss):
       losses['LATENT-L1'] = loss_registry['LATENT-L1'](gen_latents, teacher_latents_out)
     
-    if self.config.loss == 'LATENT-ADV':
-      adv_loss, stats = loss_registry['LATENT-ADV'](
-        self.ladv_model, gen_latents, teacher_latents_out, 
+    if self.config.loss in ['LATENT-ADV', 'LATENT-ADD']:
+      if self.config.loss == 'LATENT-ADV':
+        adv_model = self.ladv_model
+        adv_variant = 'ADV'
+      else:
+        adv_model = self.ladd_model
+        adv_variant = 'ADD'
+      prompt_embeds = self.pipe.prompt_embeds
+      adv_loss, stats = loss_registry[f'LATENT-{adv_variant}'](
+        adv_model, gen_latents, teacher_latents_out, 
         phase='GEN', 
         scale=self.config.adv['lambda'], 
-        is_train=True
+        is_train=True,
+        prompt_embeds = prompt_embeds
       )
-      losses['LATENT-ADV'] = adv_loss
-      losses.update(**stats)
-    
-    if self.config.loss == 'LATENT-ADD':
-      prompt_embeds = self.pipe.prompt_embeds
-      adv_loss, stats = loss_registry['LATENT-ADD'](
-        self.ladd_model, gen_latents, teacher_latents_out, prompt_embeds, 
-        phase='GEN',
-        is_train=True
-      )
-      losses['LATENT-ADD'] = adv_loss
+      losses[f'LATENT-{adv_variant}'] = adv_loss
       losses.update(**stats)
 
     if self.config.img_log_interval>0:
@@ -335,12 +336,10 @@ class Trainer:
   @torch.inference_mode()
   def get_val_losses(self, gen_latents, gen_imgs, start_idx, end_idx):
     '''returns sum-loss over start_idx -> end_idx'''
-
     losses = {}
 
     teacher_latents_out = self.val_teacher_latents_out[start_idx:end_idx].to(self.config.device)    
     losses['LATENT-L1'] = loss_registry['LATENT-L1'](gen_latents, teacher_latents_out)
-
 
     if self.config.img_log_interval>0:
       teacher_imgs = self.val_teacher_imgs[start_idx:end_idx].to(self.config.device)
@@ -352,15 +351,24 @@ class Trainer:
       
       losses['L1'] = loss_registry['L1'](gen_imgs, teacher_imgs)
     
-    if self.config.loss == 'LATENT-ADV':
-      adv_loss, stats = loss_registry['LATENT-ADV'](
-        self.ladv_model, gen_latents, teacher_latents_out, 
+    if self.config.loss in ['LATENT-ADV', 'LATENT-ADD']:
+      if self.config.loss == 'LATENT-ADV':
+        adv_model = self.ladv_model
+        adv_variant = 'ADV'
+      else:
+        adv_model = self.ladd_model
+        adv_variant = 'ADD'
+      
+      adv_variant = self.config.loss.split('-')[-1]
+      adv_loss, stats = loss_registry[f'LATENT-{adv_variant}'](
+        adv_model, gen_latents, teacher_latents_out, 
         phase='DIS', 
         scale=self.config.adv['lambda'], 
         gamma=self.config.adv['gamma'], 
-        is_train=False
+        is_train=False,
+        prompt_embeds = self.pipe.prompt_embeds
       )
-      losses['LATENT-ADV-D'] = adv_loss
+      losses[f'LATENT-{adv_variant}-D'] = adv_loss
       losses.update(**stats)
 
     return losses
@@ -400,18 +408,20 @@ class Trainer:
     log_dict = {}
     params_to_clip = []
     if self.config.loss == 'LATENT-ADV':
-      p_train = [p for p in self.ladv_model.Discriminator.parameters() if p.requires_grad]
-      params_to_clip.extend(p_train)
-      grads = torch.cat([p.grad.view(-1) for p in p_train if p.grad is not None])
-      log_dict.update(**self.get_grad_stats(grads, 'grad_ladv'))
+      adv_model = self.ladv_model
+      adv_variant = 'grad_ladv'
+    else:
+      adv_model = self.ladd_model
+      adv_variant = 'grad_ladd'
+        
+    p_train = [p for p in adv_model.discriminator.parameters() if p.requires_grad]
+    params_to_clip.extend(p_train)
+    grads = torch.cat([p.grad.view(-1) for p in p_train if p.grad is not None])
+    log_dict.update(**self.get_grad_stats(grads, adv_variant))
+
     
-    if self.config.loss == 'LATENT-ADD':
-      p_train = [p for p in self.ladd_model.disc.parameters() if p.requires_grad]
-      params_to_clip.extend(p_train)
-      grads = torch.cat([p.grad.view(-1) for p in p_train if p.grad is not None])
-      log_dict.update(**self.get_grad_stats(grads, 'grad_ladd'))
-    
-    torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=1.0)
+    ## may be dont clip it?
+    # torch.nn.utils.clip_grad_norm_(params_to_clip, max_norm=1.0)
     return log_dict
 
   def log_epoch(self, train_losses, val_losses, train_imgs_log, val_imgs_log, time_train, time_val):
@@ -517,6 +527,15 @@ class Trainer:
     self.FID = res_metrics['metrics/FID']
     
     wandb.log(res_metrics, step=self.global_step)
+
+    # imgs_log = torch.nn.functional.interpolate(imgs_gen[:4], size=(224, 224), mode='bilinear', align_corners=False).squeeze().cpu()
+
+    # wandb_log_imgs(
+    #   imgs_student=imgs_log, 
+    #   imgs_teacher=None, 
+    #   key="metrics-img",
+    #   global_step=self.global_step,
+    # )
       
 
 

@@ -71,12 +71,12 @@ class DistAdversarialTraining:
   def __init__(self, local_path, lr, device):
     self.device = device
     
-    self.Discriminator = load_r3gan_disc(
+    self.discriminator = load_r3gan_disc(
       local_path=local_path, url_type='None'
     )
 
-    self.Discriminator.to(self.device)
-    self.Opt = torch.optim.Adam(self.Discriminator.parameters(), lr=lr)
+    self.discriminator.to(self.device)
+    self.Opt = torch.optim.Adam(self.discriminator.parameters(), lr=lr)
 
 
   def ZeroCenteredGradientPenalty(self, Samples, Critics):
@@ -84,11 +84,11 @@ class DistAdversarialTraining:
     return Gradient.square().sum([1, 2, 3])
       
   def AccumulateGeneratorGradients(self, FakeSamples, RealSamples, Conditions=None, Scale=1):
-    self.Discriminator.eval()
+    self.discriminator.train()
     RealSamples = RealSamples.detach()
     
-    FakeLogits = self.Discriminator(FakeSamples, Conditions)
-    RealLogits = self.Discriminator(RealSamples, Conditions)
+    FakeLogits = self.discriminator(FakeSamples, Conditions)
+    RealLogits = self.discriminator(RealSamples, Conditions)
     
     RelativisticLogits = FakeLogits - RealLogits
     AdversarialLoss = torch.nn.functional.softplus(-RelativisticLogits)
@@ -97,15 +97,15 @@ class DistAdversarialTraining:
   
   def AccumulateDiscriminatorGradients(self, FakeSamples, RealSamples, Conditions=None, Gamma=0.2, Scale=1, is_train=True):
     if is_train: 
-      self.Discriminator.train()
+      self.discriminator.train()
       RealSamples = RealSamples.detach().requires_grad_(True)
       FakeSamples = FakeSamples.detach().requires_grad_(True)
     else:
-      self.Discriminator.eval()
+      self.discriminator.eval()
     
     
-    RealLogits = self.Discriminator(RealSamples, Conditions)
-    FakeLogits = self.Discriminator(FakeSamples, Conditions)
+    RealLogits = self.discriminator(RealSamples, Conditions)
+    FakeLogits = self.discriminator(FakeSamples, Conditions)
     
     if is_train:
       R1Penalty = self.ZeroCenteredGradientPenalty(RealSamples, RealLogits)

@@ -28,6 +28,13 @@ def main(**kwargs):
   
   if config['loss'] == 'LATENT-ADV':
     run_name += f"_ADV:[{round(1e3*config['adv']['lr'], 1)}|{config['adv']['lambda']}]"
+  
+  if config['loss'] == 'LATENT-ADD':
+    run_name += f"_ADD:[{round(1e3*config['adv']['lr'], 1)}|{config['adv']['lambda']}|{int(config['adv']['freeze'])}]"
+  
+  lrs = [config[i]['lr'] for i in ['timesteps', 'unet_timesteps', 'solver', 'adv']]
+  if lrs != [0.001]*len(lrs):
+    run_name += '_lr['+'|'.join([f'{i/0.001}' for i in lrs])+']'
 
   print(
     '\n'+'#'*50, 

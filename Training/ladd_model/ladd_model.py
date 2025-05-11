@@ -1,16 +1,17 @@
 import torch
 import torch.nn.functional as F
-from unet_D import Discriminator
+from .unet_D import Discriminator
 
 
-# G
 class LADD:
-  def __init__(self, config, device, freeze):
+  def __init__(self, config, device, freeze, lr):
 
     # set discriminator
     model_path_name = config['model_path_name']
-    self.disc = Discriminator(model_path_name, freeze=freeze).to(device)
+    self.discriminator = Discriminator(model_path_name, freeze=freeze).to(device)
     self.device = device
+
+    self.Opt = torch.optim.Adam(self.discriminator.parameters(), lr=lr)
 
     # set noise schedule
     beta_schedule = config['beta_schedule']
@@ -44,8 +45,7 @@ class LADD:
     noisy_samples = sqrt_alpha_prod * original_samples + sqrt_one_minus_alpha_prod * noise
     return noisy_samples
 
-  def G_loss(self, student_latents_out, teacher_latents_out, prompt_embeds, recon_loss_type, **kwargs):
-    self.disc.eval()
+  def generator_loss(self, student_latents_out, teacher_latents_out, prompt_embeds, scale=1):
     teacher_latents_out = teacher_latents_out.detach()
 
     bsz = student_latents_out.shape[0]
@@ -57,20 +57,14 @@ class LADD:
     noised_student = self.add_noise(student_latents_out, torch.randn_like(student_latents_out), timesteps_D_fake)
     noised_teacher = self.add_noise(teacher_latents_out, torch.randn_like(teacher_latents_out), timesteps_D_real)
 
-    fake_logits = self.disc(noised_student, timesteps_D_fake, encoder_hidden_states=prompt_embeds)
-    real_logits = self.disc(noised_teacher, timesteps_D_real, encoder_hidden_states=prompt_embeds)
-    
-    adv_loss = torch.nn.functional.softplus(-(fake_logits-real_logits))
+    fake_logits = self.discriminator(noised_student, timesteps_D_fake, encoder_hidden_states=prompt_embeds)
+    real_logits = self.discriminator(noised_teacher, timesteps_D_real, encoder_hidden_states=prompt_embeds)
+    relativistic_logits = fake_logits - real_logits
 
-    recon_loss = F.smooth_l1_loss(student_latents_out, teacher_latents_out, reduction='none')
-    recon_loss = recon_loss.mean(dim=list(range(1,len(recon_loss.shape))))
-
-    return adv_loss, recon_loss
+    adv_loss = torch.nn.functional.softplus(-(relativistic_logits))
+    return scale * adv_loss, [x.detach() for x in [adv_loss, relativistic_logits]]
   
-  def D_loss(self, student_latents_out, teacher_latents_out, prompt_embeds, gamma=0.2, is_train=True):
-    self.disc.train()
-
-    is_train = False
+  def discriminator_loss(self, student_latents_out, teacher_latents_out, prompt_embeds, gamma=0.2, scale=1, is_train=False):
     if is_train:
       student_latents_out = student_latents_out.detach().requires_grad_(True)
       teacher_latents_out = teacher_latents_out.detach().requires_grad_(True)
@@ -85,32 +79,21 @@ class LADD:
     noised_student = self.add_noise(student_latents_out, torch.randn_like(student_latents_out), timesteps_D_fake)
     noised_teacher = self.add_noise(teacher_latents_out, torch.randn_like(teacher_latents_out), timesteps_D_real)
 
-    fake_logits = self.disc(noised_student, timesteps_D_fake, encoder_hidden_states=prompt_embeds)
-    real_logits = self.disc(noised_teacher, timesteps_D_real, encoder_hidden_states=prompt_embeds)
+    fake_logits = self.discriminator(noised_student, timesteps_D_fake, encoder_hidden_states=prompt_embeds)
+    real_logits = self.discriminator(noised_teacher, timesteps_D_real, encoder_hidden_states=prompt_embeds)
+    relativistic_logits = real_logits - fake_logits
+    adv_loss = torch.nn.functional.softplus(-relativistic_logits)
 
     if is_train:
-      R1Penalty = self.ZeroCenteredGradientPenalty(noised_teacher, real_logits)
-      R2Penalty = self.ZeroCenteredGradientPenalty(noised_student, fake_logits)
+      r1_penalty = self.ZeroCenteredGradientPenalty(noised_teacher, real_logits)
+      r2_penalty = self.ZeroCenteredGradientPenalty(noised_student, fake_logits)
     else:
-      R1Penalty = torch.zeros(noised_student.shape, device=self.device)
-      R2Penalty = torch.zeros(noised_student.shape, device=self.device)
+      r1_penalty = torch.zeros_like(real_logits)
+      r2_penalty = torch.zeros_like(real_logits)
+
+    discriminator_loss = adv_loss + (gamma / 2) * (r1_penalty + r2_penalty)
     
-    logits_diff = real_logits - fake_logits
-
-    adv_loss = torch.nn.functional.softplus(-logits_diff)
-    penalty  = (gamma / 2) * (R1Penalty + R2Penalty)
-
-    
-    tol = 1e-5
-    signs = torch.where(
-        logits_diff.abs() < tol,          # condition
-        torch.zeros_like(logits_diff),    # if true: neutral
-        logits_diff.sign()                # else: usual ±1
-    )
-    sign_accuracy = signs.mean()/2+1/2
-
-    discriminator_loss = adv_loss + penalty
-    return discriminator_loss, adv_loss, penalty, sign_accuracy
+    return scale * discriminator_loss, [x.detach() for x in [adv_loss, relativistic_logits, r1_penalty, r2_penalty]]
 
   def ZeroCenteredGradientPenalty(self, Samples, Critics):
     Gradient, = torch.autograd.grad(outputs=Critics.sum(), inputs=Samples, create_graph=False, retain_graph=True)

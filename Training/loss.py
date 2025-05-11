@@ -3,7 +3,7 @@ all images should be passed as raw outputs from pipe (with values in [-1,1])
 returns raw_loss which is sum-loss over batch
 '''
 
-import os, sys, torch, torchvision, torch.nn.functional as F
+import os, sys, torch, torch.nn.functional as F
 from lpips_utils import lpips_features, lpips_features_loss
 
 ROOT = os.path.dirname( os.path.dirname(os.path.abspath(__file__)) )
@@ -22,44 +22,60 @@ def latent_adv_loss(ladv_model, student_latents_out, teacher_latents_out, phase,
     loss, adv_rellogits = ladv_model.AccumulateGeneratorGradients(
       student_latents_out, teacher_latents_out, Conditions=conditions, Scale=scale
     )
+    loss = loss.sum()
     stats['ADV-G'] = adv_rellogits[0].sum()
+
+    # add recon_loss:
+    recon_loss = F.l1_loss(student_latents_out, teacher_latents_out, reduction='none')
+    recon_loss = recon_loss.mean(dim=list(range(1,len(recon_loss.shape)))).sum()
+    stats['ADV-G_recon'] = recon_loss
+    loss = loss + recon_loss
 
   elif phase == 'DIS':
     conditions = None
     loss, adv_rellogits_penalty = ladv_model.AccumulateDiscriminatorGradients(
       student_latents_out, teacher_latents_out, Conditions=conditions, Gamma=gamma, Scale=scale, is_train=is_train
     )
+    loss = loss.sum()
     stats['ADV-D'] = adv_rellogits_penalty[0].sum()
     stats['ADV-D_pen'] = (adv_rellogits_penalty[-1] + adv_rellogits_penalty[-2]).sum()
 
     rellogits = adv_rellogits_penalty[1]
     stats['ADV-D_accuracy'] = (torch.where(rellogits.abs()<1e-5,torch.zeros_like(rellogits),rellogits.sign())/2+1/2).sum()
     stats['ADV-D_relmean']  = rellogits.sum()
-  return loss.sum(), stats
+  return loss, stats
 
 # ========================================================================================
 # LADD
 # ========================================================================================
-# @loss_registry.add_to_registry("LATENT-ADD")
-# def latent_adv_loss(ladv_model, student_latents_out, teacher_latents_out, prompt_embeds, phase, **kwargs):
-#   device = student_latents_out.device
+@loss_registry.add_to_registry("LATENT-ADD")
+def latent_add_loss(ladv_model, student_latents_out, teacher_latents_out, phase, scale=1, gamma=0.2, prompt_embeds=None, is_train=True, **kwargs):
+  stats = {}
+  if phase == 'GEN':
+    loss, adv_rellogits = ladv_model.generator_loss(
+      student_latents_out, teacher_latents_out, prompt_embeds, scale=scale
+    )
+    loss = loss.sum()
+    stats['ADD-G'] = adv_rellogits[0].sum()
 
-#   if phase == 'GEN':
-#     adv_loss, stats = ladv_model.AccumulateGeneratorGradients(student_latents_out, teacher_latents_out, Conditions=None, Scale=1)
-#   return adv_loss, ...
+    # add recon_loss:
+    recon_loss = F.l1_loss(student_latents_out, teacher_latents_out, reduction='none')
+    recon_loss = recon_loss.mean(dim=list(range(1,len(recon_loss.shape)))).sum()
+    stats['ADD-G_recon'] = recon_loss
+    loss = loss + recon_loss
 
-# @loss_registry.add_to_registry("LATENT-ADD-G")
-# def latent_add_g_loss(ladd_model, student_latents_out, teacher_latents_out, prompt_embeds, recon_loss_type, **kwargs):
-#   device = student_latents_out.device
-#   adv_loss, recon_loss = ladd_model.G_loss(student_latents_out, teacher_latents_out.to(device), prompt_embeds, **kwargs)
-#   return adv_loss, recon_loss
+  elif phase == 'DIS':
+    loss, adv_rellogits_penalty = ladv_model.discriminator_loss(
+      student_latents_out, teacher_latents_out, prompt_embeds, gamma=gamma, scale=scale, is_train=False
+    )
+    loss = loss.sum()
+    stats['ADD-D'] = adv_rellogits_penalty[0].sum()
+    stats['ADD-D_pen'] = (adv_rellogits_penalty[-1] + adv_rellogits_penalty[-2]).sum()
 
-# @loss_registry.add_to_registry("LATENT-ADD-D")
-# def latent_add_d_loss(ladd_model=None, student_latents_out=None, teacher_latents_out=None, prompt_embeds=None, **kwargs):
-#   device = student_latents_out.device
-#   is_train = kwargs.get('is_train', False)
-#   discriminator_loss, adv_loss, penalty, sign_accuracy = ladd_model.D_loss(student_latents_out, teacher_latents_out.to(device), prompt_embeds, is_train=is_train)
-#   return discriminator_loss, adv_loss, penalty, sign_accuracy
+    rellogits = adv_rellogits_penalty[1]
+    stats['ADD-D_accuracy'] = (torch.where(rellogits.abs()<1e-5,torch.zeros_like(rellogits),rellogits.sign())/2+1/2).sum()
+    stats['ADD-D_relmean']  = rellogits.sum()
+  return loss, stats
 
 # ========================================================================================
 # L1

@@ -15,7 +15,7 @@ loss_registry = ClassRegistry()
 # LADV
 # ========================================================================================
 @loss_registry.add_to_registry("LATENT-ADV")
-def latent_adv_loss(ladv_model, student_latents_out, teacher_latents_out, phase, scale=1, gamma=0.2, is_train=True, **kwargs):
+def latent_adv_loss(ladv_model, student_latents_out, teacher_latents_out, phase, scale=1, gamma=0.2, is_train=True, recon_type='LL1', **kwargs):
   stats = {}
   if phase == 'GEN':
     conditions = None
@@ -26,7 +26,10 @@ def latent_adv_loss(ladv_model, student_latents_out, teacher_latents_out, phase,
     stats['ADV-G'] = adv_rellogits[0].sum()
 
     # add recon_loss:
-    recon_loss = F.l1_loss(student_latents_out, teacher_latents_out, reduction='none')
+    if recon_type == 'LL1':
+      recon_loss = F.l1_loss(student_latents_out, teacher_latents_out, reduction='none')
+    elif recon_type == 'SL1':
+      recon_loss = F.smooth_l1_loss(student_latents_out, teacher_latents_out, reduction='none')
     recon_loss = recon_loss.mean(dim=list(range(1,len(recon_loss.shape)))).sum()
     stats['ADV-G_recon'] = recon_loss
     loss = loss + recon_loss
@@ -49,7 +52,7 @@ def latent_adv_loss(ladv_model, student_latents_out, teacher_latents_out, phase,
 # LADD
 # ========================================================================================
 @loss_registry.add_to_registry("LATENT-ADD")
-def latent_add_loss(ladv_model, student_latents_out, teacher_latents_out, phase, scale=1, gamma=0.2, prompt_embeds=None, is_train=True, **kwargs):
+def latent_add_loss(ladv_model, student_latents_out, teacher_latents_out, phase, scale=1, gamma=0.2, prompt_embeds=None, is_train=True, recon_type='LL1', **kwargs):
   stats = {}
   if phase == 'GEN':
     loss, adv_rellogits = ladv_model.generator_loss(
@@ -59,7 +62,10 @@ def latent_add_loss(ladv_model, student_latents_out, teacher_latents_out, phase,
     stats['ADD-G'] = adv_rellogits[0].sum()
 
     # add recon_loss:
-    recon_loss = F.l1_loss(student_latents_out, teacher_latents_out, reduction='none')
+    if recon_type == 'LL1':
+      recon_loss = F.l1_loss(student_latents_out, teacher_latents_out, reduction='none')
+    elif recon_type == 'SL1':
+      recon_loss = F.smooth_l1_loss(student_latents_out, teacher_latents_out, reduction='none')
     recon_loss = recon_loss.mean(dim=list(range(1,len(recon_loss.shape)))).sum()
     stats['ADD-G_recon'] = recon_loss
     loss = loss + recon_loss
@@ -80,6 +86,12 @@ def latent_add_loss(ladv_model, student_latents_out, teacher_latents_out, phase,
 # ========================================================================================
 # L1
 # ========================================================================================
+@loss_registry.add_to_registry("LATENT-SL1")
+def latent_sl1_loss(student_latents_out, teacher_latents_out, **kwargs):
+  loss = F.smooth_l1_loss(student_latents_out, teacher_latents_out, reduction='none')
+  loss = loss.mean(dim=list(range(1,len(loss.shape)))).sum()
+  return loss
+
 @loss_registry.add_to_registry("LATENT-L1")
 def latent_l1_loss(student_latents_out, teacher_latents_out, **kwargs):
   loss = F.l1_loss(student_latents_out, teacher_latents_out, reduction='none')

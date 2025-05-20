@@ -115,6 +115,7 @@ class Trainer:
 
     self.min_losses = {}
     time_last = time.perf_counter()
+    time_metrics = 0
 
     # main loop
     for epoch in tqdm.tqdm(range(self.config.epochs)):
@@ -130,8 +131,12 @@ class Trainer:
       time_val, time_last = time_last, time.perf_counter()
       time_val = time_last - time_val
 
-      self.log_epoch(train_losses, val_losses, train_imgs_log, val_imgs_log, time_train, time_val)
+      time_train_no_metrics = time_train - time_metrics
+      self.log_epoch(train_losses, val_losses, train_imgs_log, val_imgs_log, time_train_no_metrics, time_val)
       
+      # cheat with time here:
+      time_metrics = time.perf_counter()
+
       if self.config.calc_metrics_epoch > 0 and epoch % self.config.calc_metrics_epoch == 0 and epoch:
         self.calc_metrics()
 
@@ -140,6 +145,8 @@ class Trainer:
 
         gc.collect()
         torch.cuda.empty_cache()
+      
+      time_metrics = time.perf_counter() - time_metrics
 
   # ==================================================================================================================
   # TRAIN EPOCH
@@ -263,6 +270,9 @@ class Trainer:
 
     with torch.set_grad_enabled('LATENT-L1' == self.config.loss):
       losses['LATENT-L1'] = loss_registry['LATENT-L1'](gen_latents, teacher_latents_out)
+        
+    if self.config.loss == 'LATENT-SL1':
+      losses['LATENT-SL1'] = loss_registry['LATENT-SL1'](gen_latents, teacher_latents_out)
     
     if self.config.loss in ['LATENT-ADV', 'LATENT-ADD']:
       if self.config.loss == 'LATENT-ADV':
@@ -277,7 +287,8 @@ class Trainer:
         phase='GEN', 
         scale=self.config.adv['lambda'], 
         is_train=True,
-        prompt_embeds = prompt_embeds
+        prompt_embeds = prompt_embeds,
+        recon_type = self.config.adv['recon_type']
       )
       losses[f'LATENT-{adv_variant}'] = adv_loss
       losses.update(**stats)
@@ -435,11 +446,14 @@ class Trainer:
     if self.config.unet_timesteps['train']:
       log_dict.update({f'unet_timesteps/t[{n}]': t.item() for n, t in enumerate(self.unet_timesteps)})
     
-    if self.config.solver['train'] and isinstance(self.pipe.scheduler.train_params, torch.Tensor):
-      for n, p in enumerate(self.pipe.scheduler.train_params):
-        log_dict.update({f'solv/param_mean_nfe[{n}]': p.mean().item()})
-        log_dict.update({f'solv/param_std_nfe[{n}]': p.std().item()})
-        log_dict.update({f'solv/param_norm_nfe[{n}]': p.norm(2).item()})
+      
+      if isinstance(self.pipe.scheduler.train_params, torch.Tensor):
+        log_dict.update({f'solv/params': self.pipe.scheduler.train_params.detach().cpu().numpy().tolist()})
+      elif isinstance(self.pipe.scheduler.train_params, list):
+        log_dict.update({
+          f'solv/params[{n}]': p.detach().cpu().numpy().tolist()
+          for n, p in enumerate(self.pipe.scheduler.train_params)
+        })
 
     wandb.log(log_dict, step=self.global_step)
 
@@ -488,17 +502,17 @@ class Trainer:
           pipe_metrics.scheduler.train_params.append(
             self.pipe.scheduler.train_params[i].detach().clone().half()
           )
-
-    with open('/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/coco30k.pkl', 'rb') as f:
-      data = pickle.load(f)
-      prompts   = data['anns'][:30000]
-      imgs_real = data['imgs'][:30000]
+    
+    with open('/workspace-SR008.fs2/philurame/coco2014/captions/cocold3_prompts.txt', 'r') as f:
+      prompts = [x.strip() for x in f.readlines()][:30000]
+      imgs_real = None
       N = len(prompts)
 
     imgs_gen = torch.zeros(N, *pipe_metrics.img_dims, dtype=torch.uint8, device='cpu')
 
+    print('generating images for FID...', flush=True)
     batch_size = 8
-    for i in tqdm.tqdm(range(0, N, batch_size), total=N//batch_size, desc='decode...'):
+    for i in range(0, N, batch_size):
       prompts_batch = prompts[i:i+batch_size]
       generators = [torch.Generator(device='cpu').manual_seed(i+g) for g in range(len(prompts_batch))]
       gen = pipe_metrics(
@@ -512,7 +526,7 @@ class Trainer:
     
     metrics_path = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/lib/metrics'
     if metrics_path not in sys.path: sys.path.insert(0, metrics_path)
-    from r_fid  import FID1Metric
+    from r_fid import FIDRef
     # from r_clip import CLIPMetric
     metric_data = dict(
       imgs_gen=imgs_gen, 
@@ -521,7 +535,7 @@ class Trainer:
       device=self.config.device,
     )
     res_metrics = {
-      'metrics/FID':  FID1Metric()(**metric_data),
+      'metrics/FID': FIDRef()(**metric_data),
       # 'metrics/CLIP': CLIPMetric()(**metric_data)
     }
     self.FID = res_metrics['metrics/FID']
@@ -553,9 +567,8 @@ class Trainer:
         self.min_losses[loss_name] = curr_loss
 
         SAVE_TO = 'DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS'
-        proj_loss_dir = os.path.join(SAVE_TO, wandb.run.project, loss_name)
-        if not os.path.exists(proj_loss_dir): os.makedirs(proj_loss_dir)
-        with open(os.path.join(proj_loss_dir, wandb.run.name + '.pkl'), 'wb') as f:
+        if not os.path.exists(SAVE_TO): os.makedirs(SAVE_TO)
+        with open(os.path.join(SAVE_TO, wandb.run.id + '.pkl'), 'wb') as f:
           pickle.dump(self.pipe.scheduler.train_params, f)
 
   def update_graph(self):

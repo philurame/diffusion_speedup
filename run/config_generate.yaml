@@ -1,5 +1,7 @@
 model_names:
-- SDXL_BASE
+# - SDXL_BASE
+# - SD14_BASE
+- SD15_BASE
 # - DEEPCACHE2
 # - DEEPCACHE3
 # - DEEPCACHE4
@@ -9,8 +11,23 @@ model_names:
 solvers:
 # - DDIM
 # - DPMS
-# - IPNDM
-# - POLS
+# - DPMS3
+# - DEIS
+# - IPNDM2
+# - IPNDM3
+# - IPNDM4
+
+# - UNIPC2
+# - UNIPC2_
+# - UNIPC2H
+# - UNIPC2H_
+
+# - UNIPC
+# - UNIPC3_
+# - UNIPC3H
+# - UNIPC3H_
+
+
 
 # - DEIS
 # - COEF
@@ -21,6 +38,7 @@ solvers:
 
 schedulers:
 # - CUSTOM
+# - GITS
 # - LINEAR
 # - AYS
 # - KARRAS
@@ -36,7 +54,11 @@ schedulers:
 # - TUCOEFEXT2
 
 solvers_schedulers_nfes:
-- DEIS_LINEAR_4
+- DDIM_LINEAR_3
+- DDIM_LINEAR_100
+- IPNDM3_GITS_7
+
+# - DEIS_LINEAR_4
 # - COEF_TCOEF_4
 # - DEIS_TDEIS_4
 # - COEF41UP_TCOEF41UP_4
@@ -46,17 +68,24 @@ solvers_schedulers_nfes:
 # - COEFEXT_TUCOEFEXT_4
 # - COEFEXT2_TUCOEFEXT2_4
 
-- DEIS_LINEAR_10
+# - DEIS_TDEIS_6
+# - DEIS_LINEAR_6
+# - COEFEXT2_TUCOEFEXT2_6
+# - COEF41UP_COEF41UP_6
+
+# - DEIS_LINEAR_10
 # - COEF_TCOEF_10
 # - DEIS_TDEIS_10
 # - COEF41UP_TCOEF41UP_10
 # - COEFEXT_TCOEFEXT_10
 # - COEFEXT2_TCOEFEXT2_10
-- COEFEXTF_TCOEFEXTF_10
+# - COEFEXTF_TCOEFEXTF_10
 # - COEFEXT_TUCOEFEXT_10
+# - COEF41UP_COEF41UP_10
 # - COEFEXT2_TUCOEFEXT2_10
 
 nfes:
+# - 3
 # - 4
 # - 5
 # - 6
@@ -68,6 +97,7 @@ nfes:
 # - 12
 # - 13
 # - 14
+# - 15
 # - 17
 # - 20
 # - 25
@@ -80,5 +110,20 @@ nfes:
 
 datasets:
 # - COCO
-- COCO30
+# - COCO30
+# - NEWCOCO30
+- COCOLD3
 # - PARTI
+
+
+metrics: # non-grid
+# - SEC_PER_IMG
+# - LPIPS
+- FID-Ref
+# - FID2-IMGS
+# - FID1
+# - FID
+# - IS
+# - CLIP
+# - CIFAR_FID
+# - TFLOPS

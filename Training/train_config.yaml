@@ -1,24 +1,25 @@
 
-nfe: 6
-loss: LATENT-ADD
+nfe: 4
+loss: LATENT-ADV
 model: SD15_TRAIN
 calc_metrics_epoch: 1
 img_log_interval: 1
 epochs: 400
 
 solver:
-  teacher: UNIPC2H_8
-  init: UNIPC2H
+  teacher: IPNDM3_5
+  init: DDIM
   lr: 0.001
   solver: COEFEXT2
   train: true
 
 adv:
-  lr: 0.0003
-  lambda: 1
+  lr: 0.001
+  lambda: 2
   gamma: 0.2
   path: ''
-  freeze: true
+  freeze: false
+  recon_type: LL1
 
 timesteps:
   lr: 0.001

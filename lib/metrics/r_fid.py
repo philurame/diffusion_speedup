@@ -1,169 +1,128 @@
 from lib.registries import metric_registry
-import torch, tqdm
-from torchmetrics.image.fid import FrechetInceptionDistance
 
-
-@metric_registry.add_to_registry('FID')
-class FIDMetric:
-  @torch.inference_mode()
-  def __call__(self, **kwargs):
-    batch_size = kwargs.get('batch_size', 512)
-    imgs_gen  = kwargs['imgs_gen']
-    imgs_real = kwargs['imgs_real']
-    device = kwargs['device']
-
-    fid_model = FrechetInceptionDistance(feature=2048, normalize=False).to(device)
-    for i in tqdm.tqdm(range(0, imgs_gen.shape[0], batch_size), desc='FID...'):
-      fid_model.update(imgs_real[i:i+batch_size].to(device), real=True)
-      fid_model.update(imgs_gen[i:i+batch_size].to(device), real=False)
-
-    return fid_model.compute().item()
-
-# def calculate_inception_stats(
-#     image_path, num_expected=None, seed=0, max_batch_size=64,
-#     num_workers=3, prefetch_factor=2, device=torch.device('cuda'),
-# ):
-#     # Rank 0 goes first.
-#     if dist.get_rank() != 0:
-#         torch.distributed.barrier()
-
-#     # Load Inception-v3 model.
-#     # This is a direct PyTorch translation of http://download.tensorflow.org/models/image/imagenet/inception-2015-12-05.tgz
-#     dist.print0('Loading Inception-v3 model...')
-#     detector_url = 'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl'
-#     detector_kwargs = dict(return_features=True)
-#     feature_dim = 2048
-#     with dnnlib.util.open_url(detector_url, verbose=(dist.get_rank() == 0)) as f:
-#         detector_net = pickle.load(f).to(device)
-
-#     # List images.
-#     dist.print0(f'Loading images from "{image_path}"...')
-#     dataset_obj = dataset.ImageFolderDataset(path=image_path, max_size=num_expected, random_seed=seed)
-#     assert len(dataset_obj) in [10000, 30000, 50000]
-#     if num_expected is not None and len(dataset_obj) < num_expected:
-#         raise click.ClickException(f'Found {len(dataset_obj)} images, but expected at least {num_expected}')
-#     if len(dataset_obj) < 2:
-#         raise click.ClickException(f'Found {len(dataset_obj)} images, but need at least 2 to compute statistics')
-
-#     # Other ranks follow.
-#     if dist.get_rank() == 0:
-#         torch.distributed.barrier()
-
-#     # Divide images into batches.
-#     num_batches = ((len(dataset_obj) - 1) // (max_batch_size * dist.get_world_size()) + 1) * dist.get_world_size()
-#     all_batches = torch.arange(len(dataset_obj)).tensor_split(num_batches)
-#     rank_batches = all_batches[dist.get_rank() :: dist.get_world_size()]
-#     data_loader = torch.utils.data.DataLoader(dataset_obj, batch_sampler=rank_batches, num_workers=num_workers, prefetch_factor=prefetch_factor)
-
-#     # Accumulate statistics.
-#     dist.print0(f'Calculating statistics for {len(dataset_obj)} images...')
-#     mu = torch.zeros([feature_dim], dtype=torch.float64, device=device)
-#     sigma = torch.zeros([feature_dim, feature_dim], dtype=torch.float64, device=device)
-#     for images, _labels in tqdm.tqdm(data_loader, unit='batch', disable=(dist.get_rank() != 0)):
-#         torch.distributed.barrier()
-#         if images.shape[0] == 0:
-#             continue
-#         if images.shape[1] == 1:
-#             images = images.repeat([1, 3, 1, 1])
-#         features = detector_net(images.to(device), **detector_kwargs).to(torch.float64)
-#         mu += features.sum(0)
-#         sigma += features.T @ features
-
-#     # Calculate grand totals.
-#     torch.distributed.all_reduce(mu)
-#     torch.distributed.all_reduce(sigma)
-#     mu /= len(dataset_obj)
-#     sigma -= mu.ger(mu) * len(dataset_obj)
-#     sigma /= len(dataset_obj) - 1
-#     return mu.cpu().numpy(), sigma.cpu().numpy()
-
-# #----------------------------------------------------------------------------
-
-# def calculate_fid_from_inception_stats(mu, sigma, mu_ref, sigma_ref):
-#     m = np.square(mu - mu_ref).sum()
-#     s, _ = scipy.linalg.sqrtm(np.dot(sigma, sigma_ref), disp=False)
-#     fid = m + np.trace(sigma + sigma_ref - s * 2)
-#     return float(np.real(fid))
-
-
-
-import pickle
+import os
+import pathlib
 import numpy as np
-import scipy.linalg
-from lib.metrics.fid_utils import open_url
+import torch
+import torchvision.transforms as TF
+from PIL import Image
+from scipy import linalg
+from torch.nn.functional import adaptive_avg_pool2d
+from pytorch_fid.inception import InceptionV3
 
+IMAGE_EXTS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
 
+class ImageFolder(torch.utils.data.Dataset):
+  def __init__(self, files, transform=None):
+    self.files = files
+    self.transform = transform
+  def __len__(self): return len(self.files)
+  def __getitem__(self, idx):
+    img = Image.open(self.files[idx]).convert("RGB")
+    return self.transform(img) if self.transform else img
 
-      
-@metric_registry.add_to_registry('FID1')
-class FID1Metric:
+class FIDMetric:
+  def __init__(self, dims: int = 2048, num_workers: int = None):
+    self.dims = dims
+    self.num_workers = num_workers if num_workers is not None else min(os.cpu_count() or 0, 8)
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
+    self.model = InceptionV3([block_idx])
+
   @torch.inference_mode()
   def __call__(self, **kwargs):
-    imgs_real = kwargs['imgs_real']
-    imgs_gen  = kwargs['imgs_gen']
-    device    = kwargs.get('device', torch.device('cuda'))
     batch_size = kwargs.get('batch_size', 512)
+    device_arg = kwargs.get('device', None)
+    self.device = torch.device(device_arg if device_arg else ("cuda" if torch.cuda.is_available() else "cpu"))
+    self.model = self.model.to(self.device)
 
-    # Load Inception-v3 model (features-only)
-    detector_url = 'https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/files/metrics/inception-2015-12-05.pkl'
-    detector_kwargs = dict(return_features=True)
-    feature_dim = 2048
+    # Get stats for generated
+    if isinstance(kwargs['imgs_gen'], torch.Tensor):
+      mu_gen, sigma_gen = self._stats_from_tensor(kwargs['imgs_gen'], batch_size)
+    else:
+      mu_gen, sigma_gen = self._load_stats(kwargs['imgs_gen'], batch_size)
 
-    with open_url(detector_url, verbose=True) as f:
-      inception_net = pickle.load(f).to(device).eval()
+    # Get stats for real
+    if 'reference_real' in kwargs and kwargs['reference_real'] is not None:
+      mu_real, sigma_real = self._load_stats(kwargs['reference_real'], batch_size)
+    elif 'imgs_real' in kwargs and kwargs['imgs_real'] is not None:
+      mu_real, sigma_real = self._stats_from_tensor(kwargs['imgs_real'], batch_size)
 
-    def _compute_stats(imgs):
-      N = imgs.shape[0]
+    return float(self.calculate_frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real))
 
-      if imgs.dtype != torch.uint8:
-        if imgs.min() >= -0.1: # [0, 1]
-          imgs = (imgs * 255).clip(0,255).to(torch.uint8)
-        else: # [-1, 1]
-          imgs = ((imgs+1) * 127.5).clip(0,255).to(torch.uint8)
+  def _stats_from_tensor(self, tensor: torch.Tensor, batch_size: int):
+    # Normalize uint8 and [-1,1] to [0,1]
+    x = tensor.cpu()
+    if x.dtype == torch.uint8:
+      x = x.float().div(255.0)
+    if x.min() < -0.1:
+      x = x.add(1).div(2)
+    # Build loader
+    ds = torch.utils.data.TensorDataset(x)
+    loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=False,
+                                          drop_last=False, num_workers=self.num_workers)
+    activs = self._activations_from_loader(loader)
+    mu = np.mean(activs, axis=0)
+    sigma = np.cov(activs, rowvar=False)
+    return mu, sigma
 
-      # 3) Resize to 299×299
-      if imgs.shape[-2:] != (299, 299):
-        imgs = torch.nn.functional.interpolate(imgs, size=(299, 299), mode='bilinear', align_corners=False)
-      
-      if imgs.shape[1] == 1:
-        imgs = imgs.repeat(1, 3, 1, 1)
+  def _get_activations(self, files, batch_size):
+    files = list(files)
+    if batch_size > len(files): batch_size = len(files)
+    ds = ImageFolder(files, transform=TF.ToTensor())
+    loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=self.num_workers)
+    return self._activations_from_loader(loader)
 
-      # accumulators
-      mu = torch.zeros(feature_dim, dtype=torch.float64, device=device)
-      sigma = torch.zeros((feature_dim, feature_dim), dtype=torch.float64, device=device)
+  def _activations_from_loader(self, loader):
+    self.model.eval()
+    activs = []
+    for batch in loader:
+      # batch could be tuple from TensorDataset
+      imgs = batch[0] if isinstance(batch, (list, tuple)) else batch
+      imgs = imgs.to(self.device)
+      out = self.model(imgs)[0]
+      if out.size(2) != 1 or out.size(3) != 1:
+          out = adaptive_avg_pool2d(out, (1, 1))
+      feats = out.squeeze(-1).squeeze(-1).cpu().numpy()
+      activs.append(feats)
+    return np.vstack(activs)
 
-      for start in range(0, N, batch_size):
-        batch = imgs[start:start+batch_size]
-        feats = inception_net(batch.to(device), **detector_kwargs).to(torch.float64)
-        mu += feats.sum(dim=0)
-        sigma += feats.t() @ feats
+  def calculate_activation_statistics(self, files, batch_size):
+    act = self._get_activations(files, batch_size)
+    return np.mean(act, axis=0), np.cov(act, rowvar=False)
 
-      mu /= N
-      # unbiased covariance
-      sigma = (sigma - N * torch.outer(mu, mu)) / (N - 1)
-      return mu, sigma
+  def _load_stats(self, path: str, batch_size: int):
+    if path.lower().endswith('.npz'):
+      with np.load(path) as f:
+        return f['mu'], f['sigma']
+    p = pathlib.Path(path)
+    files = [str(f) for ext in IMAGE_EXTS for f in sorted(p.glob(f"*.{ext}"))]
+    return self.calculate_activation_statistics(files, batch_size)
 
+  def calculate_frechet_distance(self, mu1, sigma1, mu2, sigma2, eps=1e-6):
+    mu1, mu2 = np.atleast_1d(mu1), np.atleast_1d(mu2)
+    sigma1, sigma2 = np.atleast_2d(sigma1), np.atleast_2d(sigma2)
+    diff = mu1 - mu2
+    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    if not np.isfinite(covmean).all():
+      offset = np.eye(sigma1.shape[0]) * eps
+      covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+    if np.iscomplexobj(covmean):
+      covmean = covmean.real
+    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * np.trace(covmean)
+  
 
-    # compute stats for real and generated
-    mu_real, sigma_real = _compute_stats(imgs_real)
-    mu_gen,  sigma_gen  = _compute_stats(imgs_gen)
+@metric_registry.add_to_registry('FID-Img')
+class FIDImg(FIDMetric):
+  @torch.inference_mode()
+  def __call__(self, **kwargs):
+    kwargs.pop('reference_real', None)
+    assert 'imgs_gen' in kwargs and kwargs['imgs_gen'] is not None
+    return super().__call__(**kwargs)
 
-    # compute Frechet distance
-    diff = mu_real - mu_gen
-    m = (diff * diff).sum().item()
-
-    # scipy expects numpy arrays
-    covmean, _ = scipy.linalg.sqrtm(
-      (sigma_gen @ sigma_real).cpu().numpy(), disp=False
-    )
-    # # numerical stability: drop imaginary part
-    # if np.iscomplexobj(covmean):
-    #   covmean = covmean.real
-
-    trace_term = (
-      sigma_gen.trace().item()
-      + sigma_real.trace().item()
-      - 2.0 * np.trace(covmean)
-    )
-    fid_value = m + trace_term
-    return float(fid_value)
+@metric_registry.add_to_registry('FID-Ref')
+class FIDRef(FIDMetric):
+  @torch.inference_mode()
+  def __call__(self, **kwargs):
+    kwargs.pop('imgs_real', None)
+    kwargs['reference_real'] = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/val2014_fid_refs.npz'
+    return super().__call__(**kwargs)

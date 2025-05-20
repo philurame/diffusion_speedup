@@ -25,14 +25,15 @@ from lib.registries import (
   scheduler_registry, 
   model_registry, 
   data_registry, 
+  metric_registry
 )
 import_dir(os.path.join(ROOT, 'lib'))
 
-ANNS = data_registry['COCO'](os.path.join(ROOT, 'DATA'), max_samples=10_000).anns
+ANNS = data_registry['COCO30k'](os.path.join(ROOT, 'DATA'), max_samples=10_000).anns
 
 def construct_pipeline(solver, scheduler, model_name, half=True, init_solver=None, **pipe_kwargs):
   '''construct a pipeline with given model_name, solver and scheduler'''
-  PipeClass   = model_registry[model_name]
+  PipeClass = model_registry[model_name]
   
   if init_solver is not None:
     init_solver  = solver_registry[init_solver]

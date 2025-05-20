@@ -18,23 +18,25 @@ def main(**kwargs):
   config['device'] = f"cuda:{kwargs['device']}"
   config.update({"save_code": True, "mode": 'online'})
   proj_name = config['model']
-  run_name = f"nfe:{config['nfe']}_L:{config['loss']}_S:{config['solver']['solver']}_T:{config['solver']['teacher']}"
+  run_name = f"nfe:{config['nfe']}_L:{config['loss']}_T:{config['solver']['teacher']}_I:{config['solver']['init']}"
 
-  if config['dataset']['train_size']!=1000 and config['dataset']['batch_size']!=10:
+  if config['dataset']['train_size']!=1000 or config['dataset']['batch_size']!=10:
     run_name += f"_B:{config['dataset']['train_size']},{config['dataset']['batch_size']}"
   
-  if config['solver']['train']:
-    run_name += f"_I-{config['solver']['init']}"
+  if config['timesteps']['param_method']!='square':
+    run_name += f"_ts:{config['timesteps']['param_method']}"
   
   if config['loss'] == 'LATENT-ADV':
     run_name += f"_ADV:[{round(1e3*config['adv']['lr'], 1)}|{config['adv']['lambda']}]"
+    
+    if config['adv']['gamma'] != 0.2:
+      run_name = run_name[:-1] + f"|{config['adv']['gamma']}]"
   
   if config['loss'] == 'LATENT-ADD':
     run_name += f"_ADD:[{round(1e3*config['adv']['lr'], 1)}|{config['adv']['lambda']}|{int(config['adv']['freeze'])}]"
   
   lrs = [config[i]['lr'] for i in ['timesteps', 'unet_timesteps', 'solver', 'adv']]
-  if lrs != [0.001]*len(lrs):
-    run_name += '_lr['+'|'.join([f'{i/0.001}' for i in lrs])+']'
+  run_name += '_lr['+'|'.join([f'{i/0.001}' for i in lrs])+']'
 
   print(
     '\n'+'#'*50, 

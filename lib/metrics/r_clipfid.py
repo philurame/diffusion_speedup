@@ -22,7 +22,7 @@ class ImageFolder(torch.utils.data.Dataset):
 
 
 class CLIPFIDMetric:
-  def __init__(self, model_name_or_path: str = "openai/clip-vit-large-patch14'", num_workers: int = 0, device = None):
+  def __init__(self, model_name_or_path: str = "openai/clip-vit-base-patch32", num_workers: int = 0, device = None):
     # Load CLIP vision encoder + processor
     self.clip = CLIPModel.from_pretrained(model_name_or_path).vision_model
     self.processor = CLIPProcessor.from_pretrained(model_name_or_path)
@@ -136,5 +136,5 @@ class CLIPFID(CLIPFIDMetric):
   @torch.inference_mode()
   def __call__(self, **kwargs):
     if 'reference_real' not in kwargs or kwargs['reference_real'] is None:
-      kwargs['reference_real'] = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/coco-fid_cocold3.npz'
+      kwargs['reference_real'] = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/coco-fid_coco30k.npz'
     return super().__call__(**kwargs)

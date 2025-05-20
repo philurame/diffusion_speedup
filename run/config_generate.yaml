@@ -9,7 +9,7 @@ model_names:
 # - VQDM
 
 solvers:
-# - DDIM
+- DDIM
 # - DPMS
 # - DPMS3
 # - DEIS
@@ -39,7 +39,7 @@ solvers:
 schedulers:
 # - CUSTOM
 # - GITS
-# - LINEAR
+- LINEAR
 # - AYS
 # - KARRAS
 # - SNR
@@ -54,10 +54,6 @@ schedulers:
 # - TUCOEFEXT2
 
 solvers_schedulers_nfes:
-- DDIM_LINEAR_3
-- DDIM_LINEAR_100
-- IPNDM3_GITS_7
-
 # - DEIS_LINEAR_4
 # - COEF_TCOEF_4
 # - DEIS_TDEIS_4
@@ -85,7 +81,7 @@ solvers_schedulers_nfes:
 # - COEFEXT2_TUCOEFEXT2_10
 
 nfes:
-# - 3
+- 3
 # - 4
 # - 5
 # - 6
@@ -119,11 +115,11 @@ datasets:
 metrics: # non-grid
 # - SEC_PER_IMG
 # - LPIPS
-- FID-Ref
+- FID2-REFS
 # - FID2-IMGS
 # - FID1
 # - FID
 # - IS
-# - CLIP
+- CLIP
 # - CIFAR_FID
 # - TFLOPS

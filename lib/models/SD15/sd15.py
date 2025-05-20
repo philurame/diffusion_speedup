@@ -8,7 +8,7 @@ class BaseSD15(StableDiffusionPipeline):
     device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
     pipe = super().from_pretrained(
       "sd-legacy/stable-diffusion-v1-5", 
-      cache_dir = "/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/SD15",
+      cache_dir = "/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/SD15_FILES",
       torch_dtype=torch.float16 if half else torch.float32,
       local_files_only=True # use True for HSE cluster
     ).to(device)

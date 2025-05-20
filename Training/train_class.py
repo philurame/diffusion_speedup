@@ -446,14 +446,13 @@ class Trainer:
     if self.config.unet_timesteps['train']:
       log_dict.update({f'unet_timesteps/t[{n}]': t.item() for n, t in enumerate(self.unet_timesteps)})
     
-      
-      if isinstance(self.pipe.scheduler.train_params, torch.Tensor):
-        log_dict.update({f'solv/params': self.pipe.scheduler.train_params.detach().cpu().numpy().tolist()})
-      elif isinstance(self.pipe.scheduler.train_params, list):
-        log_dict.update({
-          f'solv/params[{n}]': p.detach().cpu().numpy().tolist()
-          for n, p in enumerate(self.pipe.scheduler.train_params)
-        })
+    if isinstance(self.pipe.scheduler.train_params, torch.Tensor):
+      log_dict.update({f'solv/params': self.pipe.scheduler.train_params.detach().cpu().numpy().tolist()})
+    elif isinstance(self.pipe.scheduler.train_params, list):
+      log_dict.update({
+        f'solv/params[{n}]': p.detach().cpu().numpy().tolist()
+        for n, p in enumerate(self.pipe.scheduler.train_params)
+      })
 
     wandb.log(log_dict, step=self.global_step)
 
@@ -502,9 +501,10 @@ class Trainer:
           pipe_metrics.scheduler.train_params.append(
             self.pipe.scheduler.train_params[i].detach().clone().half()
           )
-    
-    with open('/workspace-SR008.fs2/philurame/coco2014/captions/cocold3_prompts.txt', 'r') as f:
-      prompts = [x.strip() for x in f.readlines()][:30000]
+
+    with open('/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/cocold3.pkl', 'rb') as f:
+      data = pickle.load(f)
+      prompts   = data['anns'][:30000]
       imgs_real = None
       N = len(prompts)
 
@@ -527,7 +527,6 @@ class Trainer:
     metrics_path = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/lib/metrics'
     if metrics_path not in sys.path: sys.path.insert(0, metrics_path)
     from r_fid import FIDRef
-    # from r_clip import CLIPMetric
     metric_data = dict(
       imgs_gen=imgs_gen, 
       imgs_real=imgs_real, 
@@ -536,20 +535,10 @@ class Trainer:
     )
     res_metrics = {
       'metrics/FID': FIDRef()(**metric_data),
-      # 'metrics/CLIP': CLIPMetric()(**metric_data)
     }
     self.FID = res_metrics['metrics/FID']
     
     wandb.log(res_metrics, step=self.global_step)
-
-    # imgs_log = torch.nn.functional.interpolate(imgs_gen[:4], size=(224, 224), mode='bilinear', align_corners=False).squeeze().cpu()
-
-    # wandb_log_imgs(
-    #   imgs_student=imgs_log, 
-    #   imgs_teacher=None, 
-    #   key="metrics-img",
-    #   global_step=self.global_step,
-    # )
       
 
 

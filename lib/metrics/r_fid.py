@@ -10,6 +10,11 @@ from scipy import linalg
 from torch.nn.functional import adaptive_avg_pool2d
 from pytorch_fid.inception import InceptionV3
 
+# try:
+#   from tqdm import tqdm
+# except ImportError:
+#   def tqdm(x): return x
+
 IMAGE_EXTS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
 
 class ImageFolder(torch.utils.data.Dataset):
@@ -109,9 +114,9 @@ class FIDMetric:
     if np.iscomplexobj(covmean):
       covmean = covmean.real
     return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * np.trace(covmean)
-  
 
-@metric_registry.add_to_registry('FID-Img')
+
+@metric_registry.add_to_registry('FID-IMGS')
 class FIDImg(FIDMetric):
   @torch.inference_mode()
   def __call__(self, **kwargs):
@@ -119,7 +124,7 @@ class FIDImg(FIDMetric):
     assert 'imgs_gen' in kwargs and kwargs['imgs_gen'] is not None
     return super().__call__(**kwargs)
 
-@metric_registry.add_to_registry('FID-Ref')
+@metric_registry.add_to_registry('FID-REFS')
 class FIDRef(FIDMetric):
   @torch.inference_mode()
   def __call__(self, **kwargs):

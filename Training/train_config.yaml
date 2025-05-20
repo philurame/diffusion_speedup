@@ -1,13 +1,13 @@
 
-nfe: 4
-loss: LATENT-ADV
+nfe: 5
+loss: LATENT-L1
 model: SD15_TRAIN
 calc_metrics_epoch: 1
 img_log_interval: 1
 epochs: 400
 
 solver:
-  teacher: IPNDM3_5
+  teacher: UNIPC2H__10
   init: DDIM
   lr: 0.001
   solver: COEFEXT2
@@ -25,7 +25,7 @@ timesteps:
   lr: 0.001
   train: true
   start_method: linear
-  param_method: square
+  param_method: cumprod
 
 unet_timesteps:
   lr: 0.001
@@ -33,7 +33,7 @@ unet_timesteps:
 
 dataset:
   train_size: 1000
-  batch_size: 10
+  batch_size: 40
   mini_batch_size: 10
   val_size: 100
   val_batch_size: 1

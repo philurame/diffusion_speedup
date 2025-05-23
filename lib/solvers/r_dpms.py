@@ -6,6 +6,10 @@ class DPMS:
   order = 2
   is_trainable = False
   def step(self, model_output, sample=None, **kwargs):
+    if kwargs.get("prediction_type", "epsilon") == "v_prediction":
+      sigma_t = self.sigmas[self.step_index]
+      alpha_t = self.sigma_to_alpha_t(sigma_t)
+      model_output = alpha_t * (sample * sigma_t + model_output)
     
     model_output = self.convert_to_data_prediction(model_output, sample=sample)
     self.model_outputs = self.model_outputs[-1:] + [model_output]
@@ -69,6 +73,10 @@ class DPMS:
       - 0.5 * (alpha_t * (torch.exp(-h) - 1.0)) * D1
     )
     return x_t
+
+
+@solver_registry.add_to_registry('DPMS2')
+class DPMS2(DPMS): pass
 
 
 @solver_registry.add_to_registry('DPMS3')

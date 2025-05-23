@@ -9,6 +9,11 @@ class UNIPC3:
     solver_type = "bh2"
 
     def step(self, model_output, sample=None, **kwargs):
+        if kwargs.get("prediction_type", "epsilon") == "v_prediction":
+          sigma_t = self.sigmas[self.step_index]
+          alpha_t = self.sigma_to_alpha_t(sigma_t)
+          model_output = alpha_t * (sample * sigma_t + model_output)
+    
         # 1. Convert model_output once
         x0_pred = self._convert_model_output(model_output, sample)
 

@@ -12,42 +12,110 @@ def load_solver(scheduler, p):
       for i in range(len(scheduler.train_params)):
         scheduler.train_params[i] = scheduler.train_params[i].half()
 
-
-@scheduler_registry.add_to_registry("TDEIS")
-class TDEIS(SchedulerMixin):
+@scheduler_registry.add_to_registry("GS")
+class GS(SchedulerMixin):
   def set_timesteps(self, num_inference_steps=None, device=None, **kwargs):   
+    if num_inference_steps == 4:
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:4_L:LATENT-L1_S:COEFEXT2_T:IPNDM3_6_I-DDIM_lr[1.0|1.0|1.0|0.1].pkl'
+      timesteps = [999.0, 784.9729614257812, 492.342041015625, 174.104736328125]
+      self.unet_timesteps = [999.0, 783.666748046875, 524.8583984375, 216.271484375]
+
+    if num_inference_steps == 5:
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:5_L:LATENT-L1_S:COEFEXT2_T:IPNDM3P_7_B:100,10_I-DDIM_lr[1.0|1.0|1.0|0.1].pkl'
+      timesteps = [999.0, 849.1043701171875, 539.812744140625, 302.32952880859375, 129.8460693359375]
+      self.unet_timesteps = [999.0, 849.36962890625, 574.4070434570312, 355.1898193359375, 159.9161376953125]
+
     if num_inference_steps == 6:
-      timesteps = [999.0, 937.891357421875, 869.486083984375, 775.603271484375, 613.0316162109375, 322.08416748046875]
-    elif num_inference_steps == 10:
-      timesteps = [999.0, 960.15380859375, 923.48974609375, 885.3140869140625, 844.8024291992188, 784.7818603515625, 700.8524780273438, 547.05419921875, 275.96478271484375, 53.98443603515625]
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:6_L:LATENT-L1_S:COEFEXT2_T:IPNDM3_7_I-DDIM_lr[1.0|1.0|1.0|0.1].pkl'
+      timesteps = [999.0, 851.0889282226562, 546.3758544921875, 349.34942626953125, 231.391357421875, 103.7535400390625]
+      self.unet_timesteps = [999.0, 848.7075805664062, 583.421142578125, 400.03057861328125, 257.95599365234375, 114.8118896484375]
+
+    if num_inference_steps == 7:
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:7_L:LATENT-L1_S:COEFEXT2_T:UNIPC2HA__8_I-DDIM_lr[2.0|2.0|2.0|2.0].pkl'
+      timesteps = [999.0, 817.0244750976562, 564.5325927734375, 417.470947265625, 317.07672119140625, 202.32818603515625, 92.885986328125]
+      self.unet_timesteps = [999.0, 815.877685546875, 622.10205078125, 473.41204833984375, 358.2686767578125, 230.8482666015625, 105.57611083984375]
+    
+    load_solver(self, p)
     self.prepare_solver_data(timesteps, device)
 
-@scheduler_registry.add_to_registry("TUCOEFEXT2")
-class TUCOEFEXT2(SchedulerMixin):
+@scheduler_registry.add_to_registry("GAS")
+class GAS(SchedulerMixin):
   def set_timesteps(self, num_inference_steps=None, device=None, **kwargs):   
+    if num_inference_steps == 4:
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:4_L:LATENT-ADV_S:COEFEXT2_T:IPNDM3_6_I-DDIM_ADV:[0.3|0.1|LL1]_lr[1.0|1.0|1.0|0.3].pkl'
+      timesteps = [999.0, 784.18115234375, 492.8530578613281, 169.1993408203125]
+      self.unet_timesteps = [999.0, 782.6715087890625, 527.9403076171875, 217.556396484375]
+
+    if num_inference_steps == 5:
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:5_L:LATENT-ADV_S:COEFEXT2_T:IPNDM3_7_I-DDIM_ADV:[0.1|0.5|LL1]_lr[1.0|1.0|1.0|0.1].pkl'
+      timesteps = [999.0, 854.3948974609375, 558.1051025390625, 321.87542724609375, 137.8121337890625]
+      self.unet_timesteps = [999.0, 847.215576171875, 589.0509033203125, 361.14154052734375, 161.74285888671875]
+
     if num_inference_steps == 6:
-      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SDXL_TRAIN_TS_SOLVER/COEFEXT2_DEIS40_train:400,10_nfe:6_slr:1,1,1_L:l1_ts:linear.pkl'
-      load_solver(self, p)
-      timesteps = [999.0, 937.8103637695312, 866.4406127929688, 764.21630859375, 574.0706176757812, 210.02117919921875]
-      self.unet_timesteps = [999.0, 938.2570190429688, 883.1891479492188, 775.9857788085938, 570.0113525390625, 211.54656982421875]
-    elif num_inference_steps == 10:
-      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SDXL_TRAIN_TS_SOLVER/COEFEXT2_DEIS40_train:400,10_nfe:10_slr:1,1,1_L:l1_ts:linear.pkl'
-      load_solver(self, p)
-      timesteps = [999.0, 957.8643188476562, 919.55517578125, 881.1990356445312, 836.5147094726562, 782.945556640625, 704.312744140625, 556.6346435546875, 295.40911865234375, 58.51824951171875]
-      self.unet_timesteps = [999.0, 961.334716796875, 923.9769897460938, 886.8089599609375, 843.2684326171875, 792.1455688476562, 706.0149536132812, 535.715576171875, 246.64202880859375, 54.10955810546875]
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:6_L:LATENT-ADV_S:COEFEXT2_T:IPNDM3_7_I-DDIM_ADV:[0.1|0.5|LL1]_lr[1.0|1.0|1.0|0.1].pkl'
+      timesteps = [999.0, 853.5631103515625, 567.6004028320312, 375.99395751953125, 244.49261474609375, 107.914794921875]
+      self.unet_timesteps = [999.0, 849.724853515625, 596.067138671875, 415.74609375, 273.32379150390625, 121.13946533203125]
+
+    if num_inference_steps == 7:
+      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:7_L:LATENT-ADV_S:COEFEXT2_T:UNIPC2HA__8_I-DDIM_ADV:[1.0|2|LL1]_lr[1.0|1.0|1.0|1.0].pkl'
+      timesteps = [999.0, 818.5324096679688, 586.1100463867188, 432.4017333984375, 325.0054931640625, 211.10076904296875, 97.2752685546875]
+      self.unet_timesteps = [999.0, 812.3984985351562, 620.705078125, 494.11993408203125, 379.42901611328125, 252.91351318359375, 126.5758056640625]
+    
+    load_solver(self, p)
     self.prepare_solver_data(timesteps, device)
 
-@scheduler_registry.add_to_registry("COEF41UP")
-class COEF41UP(SchedulerMixin):
-  def set_timesteps(self, num_inference_steps=None, device=None, **kwargs):   
-    if num_inference_steps == 6:
-      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SDXL_TRAIN_TS_SOLVER/COEF41UP_DEIS40_train:400,10_nfe:6_slr:1,1,1_L:lpips_ts:linear.pkl'
-      load_solver(self, p)
-      timesteps = [999.0, 919.8023681640625, 822.2236938476562, 692.0716552734375, 461.43206787109375, 100.51776123046875]
-      self.unet_timesteps = [999.0, 919.1463623046875, 823.329345703125, 684.0023803710938, 432.25323486328125, 119.0926513671875]
-    elif num_inference_steps == 10:
-      p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SDXL_TRAIN_TS_SOLVER/COEF41UP_DEIS40_train:400,10_nfe:10_slr:1,1,1_L:l1_ts:linear.pkl'
-      load_solver(self, p)
-      timesteps = [999.0, 960.764892578125, 924.0972900390625, 883.2330932617188, 833.9671630859375, 773.0445556640625, 681.6389770507812, 516.8616943359375, 256.02728271484375, 41.5020751953125]
-      self.unet_timesteps = [999.0, 958.4864501953125, 922.8566284179688, 878.4332275390625, 835.5626220703125, 774.3377685546875, 680.220703125, 503.30267333984375, 239.97259521484375, 51.47705078125]
-    self.prepare_solver_data(timesteps, device)
+
+
+
+# # HONEST ONES:
+# @scheduler_registry.add_to_registry("GS")
+# class GS(SchedulerMixin):
+#   def set_timesteps(self, num_inference_steps=None, device=None, **kwargs):   
+#     if num_inference_steps == 4:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:4_L:LATENT-L1_S:COEFEXT2_T:IPNDM3_5_I-DDIM_lr[1.0|1.0|1.0|0.1].pkl'
+#       timesteps = [999.0, 767.5469970703125, 410.51055908203125, 166.84173583984375]
+#       self.unet_timesteps = [999.0, 767.2385864257812, 443.810791015625, 185.92376708984375]
+
+#     if num_inference_steps == 5:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:5_L:LATENT-L1_S:COEFEXT2_T:IPNDM3_6_I-DDIM_lr[1.0|1.0|1.0|0.1].pkl'
+#       timesteps = [999.0, 784.5914306640625, 495.65850830078125, 278.8197021484375, 125.61553955078125]
+#       self.unet_timesteps = [999.0, 783.8294677734375, 528.2061767578125, 315.72540283203125, 135.170166015625]
+
+#     if num_inference_steps == 6:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:6_L:LATENT-L1_S:COEFEXT2_T:IPNDM3_7_I-DDIM_lr[1.0|1.0|1.0|0.1].pkl'
+#       timesteps = [999.0, 851.0889282226562, 546.3758544921875, 349.34942626953125, 231.391357421875, 103.7535400390625]
+#       self.unet_timesteps = [999.0, 848.7075805664062, 583.421142578125, 400.03057861328125, 257.95599365234375, 114.8118896484375]
+
+#     if num_inference_steps == 7:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:7_L:LATENT-L1_S:COEFEXT2_T:UNIPC2HA__8_I-DDIM_lr[2.0|2.0|2.0|2.0].pkl'
+#       timesteps = [999.0, 817.0244750976562, 564.5325927734375, 417.470947265625, 317.07672119140625, 202.32818603515625, 92.885986328125]
+#       self.unet_timesteps = [999.0, 815.877685546875, 622.10205078125, 473.41204833984375, 358.2686767578125, 230.8482666015625, 105.57611083984375]
+    
+#     load_solver(self, p)
+#     self.prepare_solver_data(timesteps, device)
+
+# @scheduler_registry.add_to_registry("GAS")
+# class GAS(SchedulerMixin):
+#   def set_timesteps(self, num_inference_steps=None, device=None, **kwargs):   
+#     if num_inference_steps == 4:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:4_L:LATENT-ADV_S:COEFEXT2_T:IPNDM3_5_I-DDIM_ADV:[0.1|0.5|LL1]_lr[1.0|1.0|1.0|0.1].pkl'
+#       timesteps = [999.0, 773.3267211914062, 418.72601318359375, 155.5372314453125]
+#       self.unet_timesteps = [999.0, 757.86328125, 425.17938232421875, 172.21905517578125]
+
+#     if num_inference_steps == 5:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:5_L:LATENT-ADV_T:IPNDM3_6_I:DDIM_ADV:[0.1|0.5]_lr[1.0|1.0|1.0|0.1].pkl'
+#       timesteps = [999.0, 786.8468627929688, 508.2291259765625, 305.1619873046875, 144.71258544921875]
+#       self.unet_timesteps = [999.0, 785.9417724609375, 538.023681640625, 325.16925048828125, 142.3336181640625]
+
+#     if num_inference_steps == 6:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:6_L:LATENT-ADV_S:COEFEXT2_T:IPNDM3_7_I-DDIM_ADV:[0.1|0.5|LL1]_lr[1.0|1.0|1.0|0.1].pkl'
+#       timesteps = [999.0, 853.5631103515625, 567.6004028320312, 375.99395751953125, 244.49261474609375, 107.914794921875]
+#       self.unet_timesteps = [999.0, 849.724853515625, 596.067138671875, 415.74609375, 273.32379150390625, 121.13946533203125]
+
+#     if num_inference_steps == 7:
+#       p = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA/SOLV_PARAMS/SD15_TRAIN/FID/nfe:7_L:LATENT-ADV_S:COEFEXT2_T:UNIPC2HA__8_I-DDIM_ADV:[1.0|2|LL1]_lr[1.0|1.0|1.0|1.0].pkl'
+#       timesteps = [999.0, 818.5324096679688, 586.1100463867188, 432.4017333984375, 325.0054931640625, 211.10076904296875, 97.2752685546875]
+#       self.unet_timesteps = [999.0, 812.3984985351562, 620.705078125, 494.11993408203125, 379.42901611328125, 252.91351318359375, 126.5758056640625]
+    
+#     load_solver(self, p)
+#     self.prepare_solver_data(timesteps, device)

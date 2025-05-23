@@ -6,6 +6,11 @@ from lib.registries import solver_registry
 class COEFEXT2:
   order = 10
   def _step(self, model_output, sample, solver_pred, step_index, **kwargs):
+    if kwargs.get("prediction_type", "epsilon") == "v_prediction":
+      sigma_t = self.sigmas[self.step_index]
+      alpha_t = self.sigma_to_alpha_t(sigma_t)
+      model_output = alpha_t * (sample * sigma_t + model_output)
+      
     if step_index == 0: 
       self.train_model_outputs = []
       self.prev_xt = []

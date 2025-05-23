@@ -18,7 +18,8 @@ class BaseSD15(StableDiffusionPipeline):
       "beta_start": 0.00085,
       "beta_end": 0.012,
       "beta_schedule": "scaled_linear",
-      "init_noise_sigma": 1.0
+      "init_noise_sigma": 1.0,
+      "model_name": "SD15"
     }
     pipe.is_train = kwargs.get('is_train', False)
     pipe.latent_dims = (4, 64, 64)

@@ -74,7 +74,8 @@ class BaseSora(DiffusionPipeline):
       "beta_start": 0.0001,
       "beta_end": 0.02,
       "beta_schedule": "linear",
-      "init_noise_sigma": 1.0
+      "init_noise_sigma": 1.0,
+      "model_name": "sora"
     }
     pipe.is_train = kwargs.get('is_train', False)
     return pipe
@@ -92,7 +93,7 @@ class BaseSora(DiffusionPipeline):
     num_inference_steps = 50,
     timesteps = None,
     num_frames = None,
-    height = 352,
+    height = 640,
     width = 640,
     output_type = "latent",
     max_sequence_length: int = 512,
@@ -108,6 +109,19 @@ class BaseSora(DiffusionPipeline):
     height = height or self.transformer.config.sample_size[0] * self.vae.vae_scale_factor[1]
     width = width or self.transformer.config.sample_size[1] * self.vae.vae_scale_factor[2]
 
+
+    # weird... but ok...
+    positive_prompt = """
+    high quality, high aesthetic, {}
+    """
+    prompt = positive_prompt.format(prompt)
+
+    negative_prompt = """
+    nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, 
+    low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry.
+    """
+
+    negative_prompt = kwargs.get('negative_prompt', negative_prompt)
     (
       prompt_embeds,
       negative_prompt_embeds,
@@ -119,7 +133,7 @@ class BaseSora(DiffusionPipeline):
       dtype=self.transformer.dtype,
       num_samples_per_prompt=kwargs.get('num_samples_per_prompt', 1),
       do_classifier_free_guidance=do_classifier_free_guidance,
-      negative_prompt=kwargs.get('negative_prompt', None),
+      negative_prompt=negative_prompt,
       prompt_embeds=kwargs.get('prompt_embeds', None),
       negative_prompt_embeds=kwargs.get('negative_prompt_embeds', None),
       prompt_attention_mask=kwargs.get('prompt_attention_mask', None),
@@ -214,8 +228,8 @@ class BaseSora(DiffusionPipeline):
       noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
       noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-    noise_pred  = solver.eps_pred_from("v_prediction", noise_pred, latents)
-    new_latents = solver.step(model_output=noise_pred, sample=latents, generator=generator, return_dict=False)
+    # noise_pred  = solver.eps_pred_from("v_prediction", noise_pred, latents)
+    new_latents = solver.step(model_output=noise_pred, sample=latents, generator=generator, return_dict=False, prediction_type="v_prediction")
 
     if not isinstance(new_latents, torch.Tensor): new_latents = new_latents[0]
     return new_latents

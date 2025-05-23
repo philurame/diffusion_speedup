@@ -6,6 +6,10 @@ class ANEULER:
   order = 1
   is_trainable = False
   def step(self, model_output, sample=None, generator=None, **kwargs):
+    if kwargs.get("prediction_type", "epsilon") == "v_prediction":
+      sigma_t = self.sigmas[self.step_index]
+      alpha_t = self.sigma_to_alpha_t(sigma_t)
+      model_output = alpha_t * (sample * sigma_t + model_output)
     # "scale"
     sigma  = self.sigmas[self.step_index]
     sample = sample * ((sigma**2 + 1) ** 0.5)

@@ -1,7 +1,8 @@
 model_names:
 # - SDXL_BASE
 # - SD14_BASE
-- SD15_BASE
+# - SD15_BASE
+- SORA_BASE
 # - DEEPCACHE2
 # - DEEPCACHE3
 # - DEEPCACHE4
@@ -38,11 +39,11 @@ solvers:
 
 schedulers:
 # - CUSTOM
-# - GITS
+- GITS
 - LINEAR
-# - AYS
-# - KARRAS
-# - SNR
+- AYS
+- KARRAS
+- SNR
 
 # - TDEIS
 # - TCOEF
@@ -81,45 +82,47 @@ solvers_schedulers_nfes:
 # - COEFEXT2_TUCOEFEXT2_10
 
 nfes:
-- 3
+# - 3
 # - 4
 # - 5
 # - 6
 # - 7
 # - 8
 # - 9
-# - 10
+- 10
 # - 11
 # - 12
 # - 13
 # - 14
 # - 15
 # - 17
-# - 20
+- 20
 # - 25
-# - 30
+- 35
 # - 40
-# - 50
+- 50
+- 75
 # - 60
-# - 100
+- 100
 # - 200
 
 datasets:
 # - COCO
 # - COCO30
 # - NEWCOCO30
-- COCOLD3
+# - COCOLD3
 # - PARTI
+- HUAWEI
 
 
 metrics: # non-grid
 # - SEC_PER_IMG
 # - LPIPS
-- FID2-REFS
+# - FID2-REFS
 # - FID2-IMGS
 # - FID1
 # - FID
 # - IS
-- CLIP
+# - CLIP
 # - CIFAR_FID
 # - TFLOPS

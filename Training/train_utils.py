@@ -31,9 +31,8 @@ import_dir(os.path.join(ROOT, 'lib'))
 
 ANNS = data_registry['COCO'](os.path.join(ROOT, 'DATA'), max_samples=10_000).anns
 
-def construct_pipeline(solver, scheduler, model_name, half=True, init_solver=None, **pipe_kwargs):
+def construct_pipeline(solver, scheduler, model_name=None, half=True, init_solver=None, pipe=None, **pipe_kwargs):
   '''construct a pipeline with given model_name, solver and scheduler'''
-  PipeClass   = model_registry[model_name]
   
   if init_solver is not None:
     init_solver  = solver_registry[init_solver]
@@ -47,8 +46,11 @@ def construct_pipeline(solver, scheduler, model_name, half=True, init_solver=Non
   else:
     SolverClass = solver_registry[solver]
 
+  if pipe is None:
+    PipeClass = model_registry[model_name]
+    pipe = PipeClass.from_pretrained(half=half, **pipe_kwargs)
+  
   SchedulerClass = scheduler_registry[scheduler]
-  pipe = PipeClass.from_pretrained(half=half, **pipe_kwargs)
   class SolverSchedulerConstructor(SchedulerClass, SolverClass): pass
   pipe.scheduler = SolverSchedulerConstructor(config=pipe.scheduler_config)
   return pipe

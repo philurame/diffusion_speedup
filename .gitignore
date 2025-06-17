@@ -8,6 +8,7 @@ __pycache__/
 /DATA/*
 !/DATA/README.md
 !/DATA/cifar_reference.pkl
+/wandb/*
 
 # Ignore all notebooks except the ones in the notebooks folder
 *.ipynb

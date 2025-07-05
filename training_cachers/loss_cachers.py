@@ -1,39 +1,48 @@
 import torch
-from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
-from typing import List
+import lpips
+from einops import rearrange
 
 class PatchedLPIPS:
-    def __init__(self, patch_size=224, stride=160, device='cuda'):
-        self.stride = stride
+    def __init__(
+        self, 
+        patch_size = 224, 
+        stride = 160,
+        net = 'vgg',
+        device = 'cuda:0'
+    ):
         self.patch_size = patch_size
+        self.stride = stride
         self.device = device
-
-        self.lpips = LearnedPerceptualImagePatchSimilarity(
-            net_type='vgg',
-            reduction='mean',
-            normalize=False  # inputs are already in [-1, 1]
-        ).to(device)
-
-
-    @staticmethod
-    def extract_patches(image, patch_size=224, stride=160):
-        patches = []
-        h, w = image.shape[-2], image.shape[-1]
-        for y in range(0, h - patch_size + 1, stride):
-            for x in range(0, w - patch_size + 1, stride):
-                patch = image[..., y : y + patch_size, x : x + patch_size]
-                patches.append(patch)
+        
+        self.lpips = lpips.LPIPS(net=net, spatial=False).to(device)
+        self.lpips.eval()
+        
+        for param in self.lpips.parameters():
+            param.requires_grad = False
+    
+    def extract_patches(self, images):
+        patches = images.unfold(2, self.patch_size, self.stride).unfold(3, self.patch_size, self.stride) # [B, C, NumPatchesH, NumPatchesW, PatchH, PatchW]
+        patches = rearrange(patches, 'b c nh nw h w -> (b nh nw) c h w')
         return patches
     
-    
-    def preprocess(self, data) -> torch.Tensor:
-        patches = self.extract_patches(data, self.patch_size, self.stride)
-        patches = torch.stack(patches, dim=0)
-        patches = patches.reshape(-1, 3, self.patch_size, self.patch_size)
-        return patches
-    
-    
-    def calculate(self, original: torch.Tensor, generated_images: List[torch.Tensor]) -> torch.Tensor:
-        original = self.preprocess(original).to(self.device)
-        generated = self.preprocess(generated_images).to(self.device)
-        return self.lpips(generated, original).to(self.device)
+    @torch.no_grad()
+    def calculate(self, original, generated, reduction='none'):
+
+        B = original.shape[0]
+        
+        original = original.to(self.device)
+        generated = generated.to(self.device)
+        
+        original_patches = self.extract_patches(original)
+        generated_patches = self.extract_patches(generated)
+        
+        original_patches = (original_patches.clamp(-1, 1) + 1) / 2
+        generated_patches = (generated_patches.clamp(-1, 1) + 1) / 2
+        
+        lpips_scores = self.lpips(original_patches, generated_patches)
+        lpips_scores = lpips_scores.view(B, -1)  # [B * n_patches]
+        
+        if reduction == 'none':
+            return lpips_scores.mean(dim=1)  # [B]
+        elif reduction == 'mean':
+            return lpips_scores.mean()

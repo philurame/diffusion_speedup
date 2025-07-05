@@ -175,26 +175,41 @@ def log_validation(pipe, helper, logits, noise, val_dataloader, baseline_imgs, m
             count += 1
     
     wandb.log({
-        f'val {args.metric}': metric_value / count
-    }, step=step)
-    
-    
-    display_orig     = original[-display_k:]
-    display_gen      = generated[-display_k:]
-    display_baseline = baseline_imgs[-display_k:]
-    wandb.log({
-        "Val images": wandb.Image(
-            concat_images(display_orig, display_gen, display_baseline),
-            caption=f"original vs generated vs {args.baseline_name.lower()}"
-            )
-    }, step=step)
         
+    }, step=step)
+
+
+    val_images = []
+    img1 = concat_images(
+        original[:display_k],
+        generated[:display_k],
+        baseline_imgs[:display_k]
+    )
+    val_images.append(
+        wandb.Image(
+            img1,
+            caption=f"original vs generated vs {args.baseline_name.lower()}, part 1"
+        )
+    )
+    img2 = concat_images(
+        original[-display_k:],
+        generated[-display_k:],
+        baseline_imgs[-display_k:]
+    )
+    val_images.append(
+        wandb.Image(
+            img2,
+            caption=f"original vs generated vs {args.baseline_name.lower()}, part 2"
+        )
+    )
     
     fig, ax = plt.subplots()
     steps = [(t not in ts) for t in range(args.student_nfe + 1)]
     ax.plot([*range(args.student_nfe + 1)], steps)
     ax.set_xticks([*range(args.student_nfe + 1)])
     wandb.log({
+        f'val {args.metric}': metric_value / count,
+        "val images": val_images,
         "timesteps plot": wandb.Image(fig),
     }, step=step)
     plt.close(fig)
@@ -246,12 +261,12 @@ def reinforce_training_loop(
     print(f"The end of the baseline generating {args.baseline_name}")
     
     for epoch in tqdm(range(args.epochs), 'Epochs'):
-        if epoch % 10 == 0:
-            log_validation(
-                pipe, helper, logits, 
-                val_noise, val_dataloader, baseline_imgs,
-                metric, epoch * len(train_dataloader), args
-            )
+
+        log_validation(
+            pipe, helper, logits, 
+            val_noise, val_dataloader, baseline_imgs,
+            metric, epoch * len(train_dataloader), args
+        )
         
         for step, anns in tqdm(enumerate(train_dataloader), 'Train loader', leave=False):
             step = epoch * len(train_dataloader) + step

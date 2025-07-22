@@ -8,6 +8,8 @@ __pycache__/
 /DATA/*
 !/DATA/README.md
 !/DATA/cifar_reference.pkl
+!/Data/train_noise_8.pt
+!/Data/val_noise_8.pt
 /wandb/*
 
 # Ignore all notebooks except the ones in the notebooks folder

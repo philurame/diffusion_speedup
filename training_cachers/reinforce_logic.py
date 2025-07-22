@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import deque
 
+import gc
 import sys
 import os
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,36 +16,32 @@ from lib.generate_decode import seed_everything
 from training_cachers.loss_cachers import PatchedLPIPS
 
 def init_logits(args):
+    
+    temp_student_nfe = args.student_nfe - 1 # we never cache first step
     if args.init_logits == 'ones':
         logits = torch.ones(               
-            args.student_nfe, dtype=torch.float32, 
-            device=args.device, 
-            requires_grad=True
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device, requires_grad=True
         ) 
-        
-    if  args.init_logits == 'randn':
+    elif  args.init_logits == 'randn':
         logits = torch.randn(               
-            args.student_nfe, dtype=torch.float32, 
-            device=args.device, 
-            requires_grad=True
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device, requires_grad=True
         )
-        
-    if args.init_logits == 'zeros':
+    elif args.init_logits == 'zeros':
         logits = torch.zeros(               
-            args.student_nfe, dtype=torch.float32, 
-            device=args.device, 
-            requires_grad=True
-        )
-        
-    if args.init_logits == 'deepcache-3':
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device, requires_grad=True
+        ) 
+    elif args.init_logits == 'deepcache-3':
         logits = torch.ones(               
-            args.student_nfe, dtype=torch.float32, 
+            temp_student_nfe, dtype=torch.float32, 
             device=args.device
         )
-        # пересчитываемые логиты должны быть поменьше
-        logits[2::3] *= 0.9
+        logits[2::3] *= 0.9 # пересчитываемые логиты должны быть поменьше
         logits.requires_grad_(True)
-        
+    else:
+        raise ValueError(f"Unknown init_logits type: {args.init_logits}")
     return logits
 
 def sample_exp(logits, inference=False):
@@ -135,12 +132,12 @@ def log_train(logits, loss, logprobs, before_baseline, grad_mean, scheduler, ste
     }, step=step)
 
 
-def log_validation(pipe, helper, logits, noise, val_dataloader, baseline_imgs, metric, step, args, display_k=4):
+def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_images, baseline_imgs, metric, step, args, display_k=4):
     
     def concat_images(orig_imgs, gen_imgs, baseline_imgs):
-        col_orig     = torch.cat(orig_imgs.unbind(0), dim=1)
-        col_gen      = torch.cat(gen_imgs.unbind(0), dim=1)
-        col_baseline = torch.cat(baseline_imgs.unbind(0), dim=1)
+        col_orig     = torch.cat(orig_imgs.unbind(0), dim=1).cpu()
+        col_gen      = torch.cat(gen_imgs.unbind(0), dim=1).cpu()
+        col_baseline = torch.cat(baseline_imgs.unbind(0), dim=1).cpu()
         grid = torch.cat([col_orig, col_gen, col_baseline], dim=2)
         img = grid.mul(0.5).add(0.5).clamp(0, 1)
         return img.permute(1, 2, 0).cpu().numpy()
@@ -152,67 +149,138 @@ def log_validation(pipe, helper, logits, noise, val_dataloader, baseline_imgs, m
     count = 0
     
     with torch.no_grad():
-        for anns in tqdm(val_dataloader, 'Validation', leave=False):
-            with helper.default():
-                original = pipe(
-                    anns, 
-                    num_inference_steps=args.teacher_nfe, 
-                    guidance_scale=args.gs,
-                    latents=noise,
-                    output_type='pt'
-                )
-                
+        for batch_idx, anns in tqdm(enumerate(val_dataloader), 'Validation', leave=False):
+            batch_start = batch_idx * args.val_batch_size
+            batch_end = batch_start + args.val_batch_size
+            original = teacher_val_images[batch_start:batch_end].to(pipe.device)
+
             with helper.inference(timesteps=ts):
                 generated = pipe(
                     anns, 
                     num_inference_steps=args.student_nfe, 
                     guidance_scale=args.gs,
-                    latents=noise,
+                    latents=val_noise[:len(anns)],
                     output_type='pt'
                 )
-                
             metric_value += metric.calculate(original, generated).mean().item()
             count += 1
-    
-    wandb.log({
-        
-    }, step=step)
 
+    baseline = baseline_imgs[-len(original):]
 
     val_images = []
     img1 = concat_images(
         original[:display_k],
         generated[:display_k],
-        baseline_imgs[:display_k]
+        baseline[:display_k]
     )
     val_images.append(
         wandb.Image(
             img1,
-            caption=f"original vs generated vs {args.baseline_name.lower()}, part 1"
+            caption=f"original vs generated vs {args.baseline_name.lower()} 1, step {step}"
         )
     )
     img2 = concat_images(
         original[-display_k:],
         generated[-display_k:],
-        baseline_imgs[-display_k:]
+        baseline[-display_k:]
     )
     val_images.append(
         wandb.Image(
             img2,
-            caption=f"original vs generated vs {args.baseline_name.lower()}, part 2"
+            caption=f"original vs generated vs {args.baseline_name.lower()} 2, step {step}"
         )
     )
     
     fig, ax = plt.subplots()
-    steps = [(t not in ts) for t in range(args.student_nfe + 1)]
-    ax.plot([*range(args.student_nfe + 1)], steps)
-    ax.set_xticks([*range(args.student_nfe + 1)])
+    steps = [t not in ts for t in range(args.student_nfe)]
+    ax.plot(range(args.student_nfe), steps)
+    ones_positions = [i for i, val in enumerate(steps) if val == 1]
+    for pos in ones_positions:
+        ax.axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
+        ax.scatter(pos, 1, color='red', s=50, zorder=10)
+    ax.set_xticks(range(args.student_nfe))
     wandb.log({
         f'val {args.metric}': metric_value / count,
         "val images": val_images,
-        "timesteps plot": wandb.Image(fig),
+        "timesteps plot": wandb.Image(fig, caption=f"Timesteps, step {step}"),
     }, step=step)
     plt.close(fig)
+
+
+def generate_data(pipe, baseline_pipe, train_dataloader, val_dataloader, train_noise, val_noise, args):
+
+    teacher_train_data_path = os.path.join(ROOT, "DATA", f"teacher_train_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
+    if not os.path.exists(teacher_train_data_path):
+        with torch.no_grad():
+            teacher_outputs_train = []
+            for anns in tqdm(train_dataloader, 'Generating teacher train data', leave=False):
+                original_train = pipe(
+                    anns, 
+                    num_inference_steps=args.teacher_nfe,
+                    guidance_scale=args.gs,
+                    latents=train_noise[:len(anns)],
+                    output_type='pt'
+                )
+                teacher_outputs_train.append(original_train)
+            teacher_outputs_train = torch.cat(teacher_outputs_train, dim=0)        
+            torch.save(
+                teacher_outputs_train.detach().cpu(), 
+                teacher_train_data_path
+            )
+            print(f"\nTeacher train data saved: {teacher_train_data_path}.\n")
+    else:
+        print(f"\nFound ready teacher train data: {teacher_train_data_path}.\n")
+
+
+    teacher_val_data_path = os.path.join(ROOT, "DATA", f"teacher_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
+    if not os.path.exists(teacher_val_data_path):
+        with torch.no_grad():
+            teacher_outputs_val = []
+            for anns in tqdm(val_dataloader, 'Generating val train data', leave=False):
+                original_val = pipe(
+                    anns, 
+                    num_inference_steps=args.teacher_nfe,
+                    guidance_scale=args.gs,
+                    latents=val_noise[:len(anns)],
+                    output_type='pt'
+                )
+                teacher_outputs_val.append(original_val)
+            teacher_outputs_val = torch.cat(teacher_outputs_val, dim=0)        
+            torch.save(
+                teacher_outputs_val.detach().cpu(), 
+                teacher_val_data_path
+            )
+            print(f"\nTeacher val data saved: {teacher_val_data_path}.\n")
+    else:
+        print(f"\nFound ready teacher val data: {teacher_val_data_path}.\n")
+
+
+    baseline_val_data_path = os.path.join(ROOT, "DATA", f"{args.baseline_name}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
+    if not os.path.exists(baseline_val_data_path):
+        with torch.no_grad():
+            baseline_outputs_val = []
+
+            for anns in tqdm(val_dataloader, 'Generating Baseline Val loader', leave=False):
+                original_baseline = baseline_pipe(
+                    anns, 
+                    num_inference_steps=args.teacher_nfe, 
+                    guidance_scale=args.gs,
+                    latents=val_noise[:len(anns)],
+                    output_type='pt'
+                )
+                
+                baseline_outputs_val.append(original_baseline)
+
+        baseline_outputs_val = torch.cat(baseline_outputs_val, dim=0)        
+        torch.save(
+            baseline_outputs_val.cpu().detach(), 
+            baseline_val_data_path
+        )
+        print(f"\n{args.baseline_name} val data saved: {baseline_val_data_path}.\n")
+    else:
+        print(f"\nFound ready {args.baseline_name} val data: {baseline_val_data_path}.\n")
+
+    return teacher_train_data_path, teacher_val_data_path, baseline_val_data_path
 
 def reinforce_training_loop(
     pipe,
@@ -226,76 +294,96 @@ def reinforce_training_loop(
     seed_everything()
     
     helper = pipe.cacher
+    latent_size = pipe.unet.config.sample_size
     if metric_name.lower() == "patched-lpips":
         metric = PatchedLPIPS(device=pipe.device)
-        
-    latent_size = 1024 // pipe.vae_scale_factor
-    val_noise = torch.randn(
-        (args.batch_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=args.device)
+
+
+    val_noise_path = os.path.join(ROOT, "DATA", f"val_noise_{args.val_batch_size}.pt")
+    if os.path.exists(val_noise_path):
+        val_noise = torch.load(val_noise_path, weights_only=True).to(args.device)
+    else:
+        val_noise = torch.randn(
+            (args.val_batch_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=args.device)
+        torch.save(
+            val_noise, 
+            val_noise_path
+        )
+
     if args.same_train_noise:
-        train_noise = torch.randn(
-            (args.batch_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=args.device)
+        train_noise_path = os.path.join(ROOT, "DATA", f"train_noise_{args.train_batch_size}.pt")
+        if os.path.exists(train_noise_path):
+            train_noise = torch.load(train_noise_path, weights_only=True).to(args.device)
+        else:
+            train_noise = torch.randn(
+                (args.train_batch_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=args.device)
+            torch.save(
+                train_noise, 
+                train_noise_path
+            )
     
-    num_steps = args.num_steps - 1
-    student_nfe = args.student_nfe - 1
-    
+    args.num_steps = args.num_steps - 1
     logits = init_logits(args) 
     grad_mean = deque([np.nan] * 8, maxlen=8) 
-
     optim = torch.optim.Adam([logits], args.lr)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, gamma=args.gamma)
-    
-    print(f"The beginning of the baseline generating {args.baseline_name}")
-    last_val_anns = list(val_dataloader)[-1]
-    baseline_imgs = baseline_pipe(
-        last_val_anns, 
-        num_inference_steps=args.teacher_nfe, 
-        guidance_scale=args.gs,
-        latents=val_noise,
-        output_type='pt'
+
+    teacher_train_data_path, teacher_val_data_path, baseline_val_data_path = generate_data(
+        pipe,
+        baseline_pipe,
+        train_dataloader,
+        val_dataloader,
+        train_noise,
+        val_noise,
+        args
     )
+    teacher_train_images = torch.load(teacher_train_data_path, weights_only=True)
+    teacher_val_images = torch.load(teacher_val_data_path, weights_only=True)
+    baseline_val_images = torch.load(baseline_val_data_path, weights_only=True)
+
     del baseline_pipe
-    import gc
     gc.collect()
     torch.cuda.empty_cache()
-    print(f"The end of the baseline generating {args.baseline_name}")
+    print("\nEverything ready for training!\n")
+
     
     for epoch in tqdm(range(args.epochs), 'Epochs'):
 
-        log_validation(
-            pipe, helper, logits, 
-            val_noise, val_dataloader, baseline_imgs,
-            metric, epoch * len(train_dataloader), args
-        )
+        if epoch % args.eval_freq ==0:
+            log_validation(
+                pipe, helper, logits, val_noise, 
+                val_dataloader, teacher_val_images, baseline_val_images,
+                metric, epoch * len(train_dataloader), args
+            )
         
-        for step, anns in tqdm(enumerate(train_dataloader), 'Train loader', leave=False):
-            step = epoch * len(train_dataloader) + step
+        for batch_idx, anns in tqdm(enumerate(train_dataloader), 'Training', leave=False):
+            global_step = epoch * len(train_dataloader) + batch_idx
             
             if not args.same_train_noise:
                 train_noise = torch.randn(
-                    (args.batch_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=args.device)
+                    (args.train_batch_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=args.device)
                 
                 
             optim.zero_grad()
-            with helper.default():
-                original = pipe(
-                    anns, num_inference_steps=args.teacher_nfe, guidance_scale=args.gs,
-                    latents=train_noise,
-                    output_type='pt'
-                )
+            
+            batch_start = batch_idx * args.train_batch_size
+            batch_end = batch_start + args.train_batch_size
+            original = teacher_train_images[batch_start:batch_end].to(pipe.device)
                 
-            metrics = torch.empty((args.num_samples, args.batch_size), device=args.device) # [num_samples, batch_size]
+            metrics = torch.empty((args.num_samples, args.train_batch_size), device=args.device) # [num_samples, batch_size]
             logprobs = torch.zeros(args.num_samples, device=args.device)
             
             for i in tqdm(range(args.num_samples), 'Reinforce steps', leave=False):
                 perturbed_logits = sample_exp(logits, inference=False)
                 
-                ts, log_prob = top_k_log_prob(logits, perturbed_logits, num_steps)
+                ts, log_prob = top_k_log_prob(logits, perturbed_logits, args.num_steps)
 
                 with helper.inference(timesteps=ts):
                     generated = pipe(
-                        anns, num_inference_steps=student_nfe, guidance_scale=args.gs,
-                        latents=train_noise,
+                        anns, 
+                        num_inference_steps=args.student_nfe, 
+                        guidance_scale=args.gs,
+                        latents=train_noise[:len(anns)],
                         output_type='pt'
                     )
                 
@@ -308,13 +396,12 @@ def reinforce_training_loop(
             
             loss = (metrics_corrected * logprobs[:, None]).mean() * (args.num_samples) / (args.num_samples - 1)
             
-
             loss.backward()
             optim.step()
             
             log_train(
                 logits, loss, logprobs, metrics_mean.mean(), 
-                grad_mean, scheduler, step, args
+                grad_mean, scheduler, global_step, args
             )
         
         scheduler.step()

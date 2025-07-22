@@ -7,8 +7,9 @@ solver: "DDIM"
 scheduler: "LINEAR"
 baseline_name: "DEEPCACHE3"
 
-epochs: 1
-batch_size: 8
+epochs: 100
+train_batch_size: 8
+val_batch_size: 8
 max_samples: 64
 
 gs: 5
@@ -16,8 +17,9 @@ teacher_nfe: 25
 student_nfe: 25
 num_steps: 9
 num_samples: 2
+eval_freq: 1
 
-lr: 0.03
-gamma: 0.9999
+lr: 0.01
+gamma: 1 # we don't need scheduler for now
 same_train_noise: True
 init_logits: "deepcache-3"

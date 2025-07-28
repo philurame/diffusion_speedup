@@ -1,4 +1,4 @@
-from lib.registries import solver_registry
+from registries import solver_registry
 import torch
 
 @solver_registry.add_to_registry("UNIPC3")
@@ -128,42 +128,42 @@ class UNIPC2(UNIPC3):
   lower_order_final = True
   solver_type = "bh2"
 
-@solver_registry.add_to_registry("UNIPC3_")
+@solver_registry.add_to_registry("UNIPC3(bh1)")
 class UNIPC3_(UNIPC3):
   order = 3
   is_trainable = False
   lower_order_final = True
   solver_type = "bh1"
 
-@solver_registry.add_to_registry("UNIPC2_")
+@solver_registry.add_to_registry("UNIPC2(bh1)")
 class UNIPC2_(UNIPC3):
   order = 2
   is_trainable = False
   lower_order_final = True
   solver_type = "bh1"
 
-@solver_registry.add_to_registry("UNIPC3H")
+@solver_registry.add_to_registry("UNIPC3-H")
 class UNIPC3H(UNIPC3):
   order = 3
   is_trainable = False
   lower_order_final = False
   solver_type = "bh2"
 
-@solver_registry.add_to_registry("UNIPC2H")
+@solver_registry.add_to_registry("UNIPC2-H")
 class UNIPC2H(UNIPC3):
   order = 2
   is_trainable = False
   lower_order_final = False
   solver_type = "bh2"
 
-@solver_registry.add_to_registry("UNIPC3H_")
+@solver_registry.add_to_registry("UNIPC3(bh1)-H")
 class UNIPC3H_(UNIPC3):
   order = 3
   is_trainable = False
   lower_order_final = False
   solver_type = "bh1"
 
-@solver_registry.add_to_registry("UNIPC2H_")
+@solver_registry.add_to_registry("UNIPC2(bh1)-H")
 class UNIPC2H_(UNIPC3):
   order = 2
   is_trainable = False

@@ -24,6 +24,11 @@ class BaseSD15(StableDiffusionPipeline):
     pipe.is_train = kwargs.get('is_train', False)
     pipe.latent_dims = (4, 64, 64)
     pipe.img_dims    = (3, 512, 512)
+
+    for param in pipe.unet.parameters():
+      param.requires_grad = False
+    for param in pipe.vae.parameters():
+      param.requires_grad = False
     return pipe
   
   def __call__(self, *args, **kwargs):
@@ -135,22 +140,23 @@ class BaseSD15(StableDiffusionPipeline):
     new_latents = solver.step(model_output=noise_pred, sample=latents, generator=generator, return_dict=False, latent_dims=self.latent_dims)
     if not isinstance(new_latents, torch.Tensor): new_latents = new_latents[0]
     return new_latents
-  
 
   def retrieve_timesteps(self,num_inference_steps=None, device=None, timesteps=None, **kwargs):
     '''scheduler.set_timesetps(...)'''
     if timesteps is not None:
       self.scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
-      timesteps = self.scheduler.timesteps
+      unet_timesteps = self.scheduler.timesteps
       num_inference_steps = len(timesteps)
-    else:
+    elif num_inference_steps is not None:
       self.scheduler.set_timesteps(num_inference_steps=num_inference_steps, device=device, **kwargs)
-      timesteps = self.scheduler.timesteps
+      unet_timesteps = self.scheduler.timesteps
     
     if getattr(self.scheduler, 'unet_timesteps', None) is not None:
-      timesteps = self.scheduler.unet_timesteps
+      unet_timesteps = self.scheduler.unet_timesteps
+    if kwargs.get('unet_timesteps', None) is not None:
+      unet_timesteps = kwargs['unet_timesteps']
 
-    return timesteps, num_inference_steps
+    return unet_timesteps, num_inference_steps
   
   def decode_latents(self, latents):
     imgs_pt = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=None)[0]

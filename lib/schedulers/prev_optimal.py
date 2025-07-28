@@ -1,4 +1,4 @@
-from lib.registries import scheduler_registry
+from registries import scheduler_registry
 from lib.schedulers.mixin_scheduler import SchedulerMixin
 
 import pickle, torch

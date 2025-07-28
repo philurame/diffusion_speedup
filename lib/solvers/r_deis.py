@@ -1,4 +1,4 @@
-from lib.registries import solver_registry
+from registries import solver_registry
 import torch
 
 @solver_registry.add_to_registry('DEIS')
@@ -52,3 +52,7 @@ class DEIS:
 
     x_t = alpha_t * (sample / alpha_s0 + coef1 * m0 + coef2 * m1)
     return x_t
+
+
+@solver_registry.add_to_registry('DEIS2')
+class DEIS2(DEIS): pass

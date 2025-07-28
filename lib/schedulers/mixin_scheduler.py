@@ -18,6 +18,8 @@ class SchedulerMixin:
   
     if kwargs.get("rescale_betas_zero_snr", False):
       self.alphas_cumprod[-1] = 2**(-24)
+    
+    self.step_index = 0
 
   def prepare_solver_data(self, timesteps, device, sigmas=None):
     '''
@@ -48,7 +50,7 @@ class SchedulerMixin:
       w = timesteps - idx_lower.to(timesteps.dtype)
       sigma_interp = sigmas[idx_lower] * (1 - w) + sigmas[idx_upper] * w
 
-      if timesteps[-1] == 0.: 
+      if timesteps[-1] < 0.001: 
         sigma_last = torch.tensor([0.], dtype=torch.float32)
       else:
         sigma_last = ((1 - self.alphas_cumprod[0]) / self.alphas_cumprod[0]).sqrt().unsqueeze(0)

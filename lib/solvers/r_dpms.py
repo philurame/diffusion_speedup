@@ -1,4 +1,4 @@
-from lib.registries import solver_registry
+from registries import solver_registry
 import torch
 
 @solver_registry.add_to_registry('DPMS')

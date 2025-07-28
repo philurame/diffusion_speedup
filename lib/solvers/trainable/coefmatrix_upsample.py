@@ -1,4 +1,4 @@
-from lib.registries import solver_registry
+from registries import solver_registry
 from lib.solvers.trainable.set_solver import SETSOLVER
 import torch, math
 

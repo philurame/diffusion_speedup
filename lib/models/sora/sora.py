@@ -1,3 +1,4 @@
+
 import torch, sys, os
 from transformers import AutoTokenizer, MT5EncoderModel
 
@@ -61,12 +62,12 @@ class BaseSora(DiffusionPipeline):
     pipe = cls(vae, text_encoder_1, tokenizer_1, transformer_model, None, None).to(device)
     pipe._device = device
 
-    # if kwargs.get('save_memory', False):
-    #   pipe.enable_model_cpu_offload()
-    #   pipe.enable_sequential_cpu_offload()
-    #   vae.vae.enable_tiling()
-    #   vae.vae.t_chunk_enc = 8
-    #   vae.vae.t_chunk_dec = vae.vae.t_chunk_enc // 2
+    if kwargs.get('save_memory', False):
+      # pipe.enable_model_cpu_offload()
+      # pipe.enable_sequential_cpu_offload()
+      vae.vae.enable_tiling()
+      vae.vae.t_chunk_enc = 8
+      vae.vae.t_chunk_dec = vae.vae.t_chunk_enc // 2
   
     pipe.scheduler_config = {
       "model_path_name": "",
@@ -79,6 +80,10 @@ class BaseSora(DiffusionPipeline):
     }
     pipe.is_train = kwargs.get('is_train', False)
     return pipe
+  
+  @property
+  def device(self):
+    return self._device
 
 
   def __call__(self, *args, **kwargs):
@@ -177,8 +182,8 @@ class BaseSora(DiffusionPipeline):
 
     if output_type == "latent":
       return latents
-
-    videos = self.decode_latents(latents)
+    
+    videos = self.decode_latents(latents, cpu=True)
     videos = videos[:, :num_frames, :height, :width]
 
     # Offload all models
@@ -187,12 +192,12 @@ class BaseSora(DiffusionPipeline):
     return videos
 
 
-  def decode_latents(self, latents):
-    print(f'before vae decode {latents.shape}', torch.max(latents).item(), torch.min(latents).item(), torch.mean(latents).item(), torch.std(latents).item())
-    video = self.vae.decode(latents.to(self.vae.vae.dtype))
-    print(f'after vae decode {latents.shape}', torch.max(video).item(), torch.min(video).item(), torch.mean(video).item(), torch.std(video).item())
-    video = ((video / 2.0 + 0.5).clamp(0, 1) * 255).to(dtype=torch.uint8).cpu().permute(0, 1, 3, 4, 2).contiguous() # b t h w c
-    return video
+  def decode_latents(self, latents, cpu=False):
+    with torch.set_grad_enabled(self.is_train):
+      video = self.vae.decode(latents.to(self.vae.vae.dtype))
+    if cpu: 
+      return ((video / 2.0 + 0.5).clamp(0, 1) * 255).to(dtype=torch.uint8).cpu().permute(0, 1, 3, 4, 2).contiguous() # returns  b t h w c
+    return (video / 2.0 + 0.5).clamp(0, 1).permute(0, 1, 3, 4, 2).contiguous()
 
 
   def make_diffusion_solver_step(self, solver, latents, t, guidance_scale, generator, **diffusion_kwargs):
@@ -405,3 +410,19 @@ class BaseSora(DiffusionPipeline):
         fps=18, 
         quality=10
       )
+  
+  def show_video(self, video, fps=18):
+    import imageio
+    import tempfile
+    import IPython.display as display
+    import os
+    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+    assert video.ndim == 5 and video.shape[0] == 1 and video.shape[-1] == 3
+    video_np = video.squeeze(0).numpy()  # Shape: (T, H, W, 3)
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
+      writer = imageio.get_writer(temp_file.name, fps=fps, codec='libx264', quality=5)
+      for frame in video_np:
+        writer.append_data(frame)
+      writer.close()
+      return display.display(display.Video(temp_file.name, embed=True))

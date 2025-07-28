@@ -1,0 +1,43 @@
+# ----------------------------
+# GRID CONFIGS
+# ----------------------------
+model_names:
+- SDXL_BASE
+# - SD15_BASE
+# - SORA_BASE
+
+solvers:
+# - DDIM
+# - DPMS
+# - DEIS
+
+schedulers:
+# - LINEAR
+# - LEADING
+# - GITS
+# - AYS
+# - KARRAS
+# - SNR
+
+nfes:
+# - 7
+# - 10
+
+# ----------------------------
+# SEQUENTIAL CONFIGS
+# ----------------------------
+solvers_schedulers_nfes:
+# - IPNDM3_GITS_7
+- DPMS_AYS_10
+# - DDIM_LINEAR_100
+
+# ----------------------------
+# DATASET & METRICS
+# ----------------------------
+datasets:
+- COCO-SHORT
+
+metrics:
+- CLIP
+- ImageReward
+- HPS

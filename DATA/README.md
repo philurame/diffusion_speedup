@@ -1,2 +1,0 @@
-- Download datasets via [kaggle](https://www.kaggle.com/code/philurame/downloading-cifar10-imagenet-mscoco-datasets)
-- optionally preprocess it with `notebooks/preprocess_datasets.ipynb`

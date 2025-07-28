@@ -1,4 +1,4 @@
-from lib.registries import model_registry
+from registries import model_registry
 from lib.models.SD15.sd15 import BaseSD15
 import torch
 import torch.utils.checkpoint as cp
@@ -10,8 +10,6 @@ class TrainSD15(BaseSD15):
     kwargs.pop('half', None)
     kwargs.pop('is_train', None)
     pipe = super().from_pretrained(half=False, is_train=True, *args, **kwargs)
-    for param in pipe.unet.parameters():
-      param.requires_grad = False
     return pipe
 
   def make_unet_solver_step(self, solver, latents, t, guidance_scale, generator, **unet_kwargs):

@@ -1,133 +1,118 @@
-from lib.registries import metric_registry
+from registries import metric_registry
+from lib.metrics.fid_utils import FIDClass
 
-import os
-import pathlib
-import numpy as np
-import torch
-import torchvision.transforms as TF
-from PIL import Image
-from scipy import linalg
 from torch.nn.functional import adaptive_avg_pool2d
 from pytorch_fid.inception import InceptionV3
+from transformers import AutoImageProcessor, AutoModel
+from transformers import CLIPModel, CLIPProcessor
 
-# try:
-#   from tqdm import tqdm
-# except ImportError:
-#   def tqdm(x): return x
+import os
+import numpy as np
+import torch
 
-IMAGE_EXTS = {"bmp", "jpg", "jpeg", "pgm", "png", "ppm", "tif", "tiff", "webp"}
-
-class ImageFolder(torch.utils.data.Dataset):
-  def __init__(self, files, transform=None):
-    self.files = files
-    self.transform = transform
-  def __len__(self): return len(self.files)
-  def __getitem__(self, idx):
-    img = Image.open(self.files[idx]).convert("RGB")
-    return self.transform(img) if self.transform else img
-
-class FIDMetric:
-  def __init__(self, dims: int = 2048, num_workers: int = None):
-    self.dims = dims
-    self.num_workers = num_workers if num_workers is not None else min(os.cpu_count() or 0, 8)
-    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[dims]
-    self.model = InceptionV3([block_idx])
-
+@metric_registry.add_to_registry('FID')
+class FIDMetric(FIDClass):
+  img_size = 299
   @torch.inference_mode()
-  def __call__(self, **kwargs):
-    batch_size = kwargs.get('batch_size', 512)
-    device_arg = kwargs.get('device', None)
-    self.device = torch.device(device_arg if device_arg else ("cuda" if torch.cuda.is_available() else "cpu"))
-    self.model = self.model.to(self.device)
-
-    # Get stats for generated
-    if isinstance(kwargs['imgs_gen'], torch.Tensor):
-      mu_gen, sigma_gen = self._stats_from_tensor(kwargs['imgs_gen'], batch_size)
-    else:
-      mu_gen, sigma_gen = self._load_stats(kwargs['imgs_gen'], batch_size)
-
-    # Get stats for real
-    if 'reference_real' in kwargs and kwargs['reference_real'] is not None:
-      mu_real, sigma_real = self._load_stats(kwargs['reference_real'], batch_size)
-    elif 'imgs_real' in kwargs and kwargs['imgs_real'] is not None:
-      mu_real, sigma_real = self._stats_from_tensor(kwargs['imgs_real'], batch_size)
-
-    return float(self.calculate_frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real))
-
-  def _stats_from_tensor(self, tensor: torch.Tensor, batch_size: int):
-    # Normalize uint8 and [-1,1] to [0,1]
-    x = tensor.cpu()
-    if x.dtype == torch.uint8:
-      x = x.float().div(255.0)
-    if x.min() < -0.1:
-      x = x.add(1).div(2)
-    # Build loader
-    ds = torch.utils.data.TensorDataset(x)
-    loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=False,
-                                          drop_last=False, num_workers=self.num_workers)
-    activs = self._activations_from_loader(loader)
-    mu = np.mean(activs, axis=0)
-    sigma = np.cov(activs, rowvar=False)
-    return mu, sigma
-
-  def _get_activations(self, files, batch_size):
-    files = list(files)
-    if batch_size > len(files): batch_size = len(files)
-    ds = ImageFolder(files, transform=TF.ToTensor())
-    loader = torch.utils.data.DataLoader(ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=self.num_workers)
-    return self._activations_from_loader(loader)
-
-  def _activations_from_loader(self, loader):
+  def __call__(self, imgs_gen, imgs_real, batch_size=64, device=None, verbose=False, **kwargs):
+    torch.manual_seed(0)
+    device = device or imgs_gen.device
+    block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[2048]
+    self.model = InceptionV3([block_idx]).to(device)
     self.model.eval()
+
+    mu_gen, sigma_gen   = self._stats_from_tensor(imgs_gen,  batch_size, verbose=verbose)
+    mu_real, sigma_real = self._stats_from_tensor(imgs_real, batch_size, verbose=verbose)
+    return float(self._frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real))
+    
+  def _extract_features(self, loader):
+    device = next(self.model.parameters()).device
     activs = []
     for batch in loader:
       # batch could be tuple from TensorDataset
       imgs = batch[0] if isinstance(batch, (list, tuple)) else batch
-      imgs = imgs.to(self.device)
+      imgs = imgs.to(device)
       out = self.model(imgs)[0]
       if out.size(2) != 1 or out.size(3) != 1:
-          out = adaptive_avg_pool2d(out, (1, 1))
+        out = adaptive_avg_pool2d(out, (1, 1))
       feats = out.squeeze(-1).squeeze(-1).cpu().numpy()
       activs.append(feats)
     return np.vstack(activs)
 
-  def calculate_activation_statistics(self, files, batch_size):
-    act = self._get_activations(files, batch_size)
-    return np.mean(act, axis=0), np.cov(act, rowvar=False)
 
-  def _load_stats(self, path: str, batch_size: int):
-    if path.lower().endswith('.npz'):
-      with np.load(path) as f:
-        return f['mu'], f['sigma']
-    p = pathlib.Path(path)
-    files = [str(f) for ext in IMAGE_EXTS for f in sorted(p.glob(f"*.{ext}"))]
-    return self.calculate_activation_statistics(files, batch_size)
-
-  def calculate_frechet_distance(self, mu1, sigma1, mu2, sigma2, eps=1e-6):
-    mu1, mu2 = np.atleast_1d(mu1), np.atleast_1d(mu2)
-    sigma1, sigma2 = np.atleast_2d(sigma1), np.atleast_2d(sigma2)
-    diff = mu1 - mu2
-    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
-    if not np.isfinite(covmean).all():
-      offset = np.eye(sigma1.shape[0]) * eps
-      covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
-    if np.iscomplexobj(covmean):
-      covmean = covmean.real
-    return diff.dot(diff) + np.trace(sigma1) + np.trace(sigma2) - 2 * np.trace(covmean)
-
-
-@metric_registry.add_to_registry('FID-IMGS')
-class FIDImg(FIDMetric):
+@metric_registry.add_to_registry('FID-DINO')
+class DINOv2FIDMetric(FIDClass):
+  img_size = 224
+  model_name_or_path = "facebook/dinov2-base"
   @torch.inference_mode()
-  def __call__(self, **kwargs):
-    kwargs.pop('reference_real', None)
-    assert 'imgs_gen' in kwargs and kwargs['imgs_gen'] is not None
-    return super().__call__(**kwargs)
+  def __call__(self, imgs_gen, imgs_real, batch_size=64, device=None, verbose=False, **kwargs):
+    torch.manual_seed(0)
+    device = device or imgs_gen.device
+    self.processor = AutoImageProcessor.from_pretrained(self.model_name_or_path)
+    self.model = AutoModel.from_pretrained(self.model_name_or_path).to(device)
+    self.model.eval()
 
-@metric_registry.add_to_registry('FID-REFS')
-class FIDRef(FIDMetric):
+    mu_gen, sigma_gen   = self._stats_from_tensor(imgs_gen,  batch_size, verbose=verbose)
+    mu_real, sigma_real = self._stats_from_tensor(imgs_real, batch_size, verbose=verbose)
+    return float(self._frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real))
+
+  def _extract_features(self, loader):
+    device = self.model.device
+    all_feats = []
+    for batch in loader:
+      imgs = batch[0] if isinstance(batch, (list, tuple)) else batch
+      inputs = self.processor(
+        images=imgs, return_tensors="pt", do_normalize=True, do_rescale=False
+      ).to(device)
+      outputs = self.model(**inputs)
+      # use [CLS] token embedding
+      cls_feats = outputs.last_hidden_state[:, 0].detach().cpu().numpy()
+      all_feats.append(cls_feats)
+    return np.vstack(all_feats)
+
+
+@metric_registry.add_to_registry('FID-CLIP')
+class CLIPFIDMetric(FIDClass):
+  img_size = 224
+  model_name_or_path = 'openai/clip-vit-large-patch14'
   @torch.inference_mode()
-  def __call__(self, **kwargs):
-    kwargs.pop('imgs_real', None)
-    kwargs['reference_real'] = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/val2014_fid_refs.npz'
-    return super().__call__(**kwargs)
+  def __call__(self, imgs_gen, imgs_real, batch_size=64, device=None, verbose=False, **kwargs):
+    torch.manual_seed(0)
+    device = device or imgs_gen.device
+    self.processor = CLIPProcessor.from_pretrained(self.model_name_or_path)
+    self.clip_model = CLIPModel.from_pretrained(self.model_name_or_path).vision_model.to(device)
+    self.clip_model.eval()
+
+    mu_gen, sigma_gen   = self._stats_from_tensor(imgs_gen,  batch_size, verbose=verbose)
+    mu_real, sigma_real = self._stats_from_tensor(imgs_real, batch_size, verbose=verbose)
+    return float(self._frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real))
+
+  def _extract_features(self, loader):
+    device = next(self.clip_model.parameters()).device
+    all_feats = []
+    for batch in loader:
+      imgs = batch[0] if isinstance(batch, (list, tuple)) else batch
+      inputs = self.processor(images=imgs, return_tensors="pt", do_rescale=False).to(device)
+      outputs = self.clip_model(**inputs)
+      # pooled_output shape: (B, hidden_dim)
+      feats = outputs.pooler_output.detach().cpu().numpy()
+      all_feats.append(feats)
+    return np.vstack(all_feats)
+
+
+# ---------------------------------------------------------
+# ALTERNATIVE: torchmetrics FID
+# ---------------------------------------------------------
+# from torchmetrics.image.fid import FrechetInceptionDistance
+# import tqdm
+# @metric_registry.add_to_registry('FID')
+# class FIDMetric:
+#   @torch.inference_mode()
+#   def __call__(self, imgs_gen, imgs_real, batch_size=512, device=None, verbose=False, **kwargs):
+#     device = kwargs.get('device', None)
+#     device = device or imgs_gen.device
+#     fid_model = FrechetInceptionDistance(feature=2048, normalize=False).to(device)
+#     for i in tqdm.tqdm(range(0, imgs_gen.shape[0], batch_size), disable=not verbose):
+#       fid_model.update(imgs_real[i:i+batch_size].to(device), real=True)
+#       fid_model.update(imgs_gen[i:i+batch_size].to(device), real=False)
+#     return fid_model.compute().item()

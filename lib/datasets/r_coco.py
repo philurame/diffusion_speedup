@@ -1,58 +1,37 @@
-from lib.registries import data_registry
-import pickle, os
+from registries import data_registry
+import os, torch
 
-from lib.registries import data_registry
-import pickle, os
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # DIFFUSION_SPEEDUP
 
-# @data_registry.add_to_registry('COCO30k')
-# class COCO30:
-#   def __init__(self, data_path, max_samples):
-#     with open('/workspace-SR008.fs2/philurame/coco2014/captions/coco30k_prompts.txt', 'r') as f:
-#       self.anns = [x.strip() for x in f.readlines()][:max_samples]
-#     self.imgs = None
+@data_registry.add_to_registry('COCO-LONG')
+class COCO_LONG:
+  def __init__(self, data_path=os.path.join(ROOT, 'DATA')):
+    self.prompts = None
+    self.imgs    = None
 
-# @data_registry.add_to_registry('COCOLD3')
-# class COCOLD3:
-#   def __init__(self, data_path, max_samples):
-#     with open('/workspace-SR008.fs2/philurame/coco2014/captions/cocold3_prompts.txt', 'r') as f:
-#       self.anns = [x.strip() for x in f.readlines()][:max_samples]
-#     self.imgs = None
+    path_prompts = os.path.join(data_path, 'coco_long_10k.txt')
+    path_imgs    = os.path.join(data_path, 'coco_imgs299_10k.pt')
 
-@data_registry.add_to_registry('COCO')
-class COCO:
-  def __init__(self, data_path, max_samples):
-    with open(os.path.join(data_path, 'datasets_coco_parti.pkl'), 'rb') as f:
-      data = pickle.load(f)['COCO']
+    if os.path.exists(path_prompts):
+      with open(path_prompts, 'r') as f:
+        self.prompts = [line.strip() for line in f]
+    
+    if os.path.exists(path_imgs):
+      self.imgs = torch.load(path_imgs)
+  
 
-    self.anns = data['anns'][:max_samples]
-    self.imgs = data['imgs'][:max_samples]
+@data_registry.add_to_registry('COCO-SHORT')
+class COCO_SHORT:
+  def __init__(self, data_path=os.path.join(ROOT, 'DATA')):
+    self.prompts = None
+    self.imgs    = None
 
+    path_prompts = os.path.join(data_path, 'coco_short_10k.txt')
+    path_imgs    = os.path.join(data_path, 'coco_imgs299_10k.pt')
 
-@data_registry.add_to_registry('COCO30')
-class COCO30:
-  def __init__(self, data_path, max_samples):
-    with open(os.path.join(data_path, 'coco30k_old.pkl'), 'rb') as f:
-      data = pickle.load(f)
-
-    self.anns = data['anns'][:max_samples]
-    self.imgs = data['imgs'][:max_samples]
-
-
-@data_registry.add_to_registry('NEWCOCO30')
-class NEWCOCO30:
-  def __init__(self, data_path, max_samples):
-    with open(os.path.join(data_path, 'coco30k.pkl'), 'rb') as f:
-      data = pickle.load(f)
-
-    self.anns = data['anns'][:max_samples]
-    self.imgs = data['imgs'][:max_samples]
-
-
-@data_registry.add_to_registry('COCOLD3')
-class NEWCOCO30:
-  def __init__(self, data_path, max_samples):
-    with open(os.path.join(data_path, 'cocold3.pkl'), 'rb') as f:
-      data = pickle.load(f)
-
-    self.anns = data['anns'][:max_samples]
-    self.imgs = None
+    if os.path.exists(path_prompts):
+      with open(path_prompts, 'r') as f:
+        self.prompts = [line.strip() for line in f]
+    
+    if os.path.exists(path_imgs):
+      self.imgs = torch.load(path_imgs)

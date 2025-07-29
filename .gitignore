@@ -6,10 +6,10 @@ wandb/
 *.pt
 *.pkl
 
-# Ignore all files in DATA except for README.md and cifar_reference.pkl
+# Ignore all files in DATA except for README.md and quantization_data
 /DATA/*
 !/DATA/README.md
-!/DATA/quantization_data/*.pkl
+!/DATA/quantization_data/*
 
 
 # Ignore all notebooks except the ones in the notebooks folder

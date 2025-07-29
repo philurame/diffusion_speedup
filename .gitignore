@@ -9,7 +9,7 @@ wandb/
 # Ignore all files in DATA except for .txt files and quantization_data
 /DATA/*
 !/DATA/*.txt
-!/DATA/quantization_data/*
+!/DATA/quantization_data/*.pkl
 
 # Ignore all notebooks except the ones in the notebooks folder
 *.ipynb

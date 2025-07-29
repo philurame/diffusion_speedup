@@ -5,11 +5,11 @@ wandb/
 # Ignore model weights and pickle files
 *.pt
 *.pkl
-!/DATA/quantization_data/*.pkl
 
 # Ignore all files in DATA except for README.md and cifar_reference.pkl
 /DATA/*
 !/DATA/README.md
+!/DATA/quantization_data/*.pkl
 
 
 # Ignore all notebooks except the ones in the notebooks folder

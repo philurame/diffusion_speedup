@@ -8,8 +8,8 @@ loss:
   coeffs: [1,1,1]
 
 metric:
-  name: VBENCH
-  period: 1
+  name: 
+  period: 0
 
 rl:
   num_samples: 2

@@ -27,7 +27,11 @@ def quantize_model(pipe, config, inplace=False, skip_layers=[], quantize_text_en
   # ================================================================================
   smooth_scales = None
   if config['use_smoothquant']:
-    smooth_scales = aggregate_absmax(**config['smoothquant'])
+    if config['smoothquant']['path_smooth_quant']:
+      with open(config['smoothquant']['path_smooth_quant'], 'rb') as f:
+        smooth_scales = pickle.load(f)
+    else:
+      smooth_scales = aggregate_absmax(**config['smoothquant'])
 
   # ================================================================================
   # DuQuant: construct duquant_params from w_duquant_params and/or a_duquant_params

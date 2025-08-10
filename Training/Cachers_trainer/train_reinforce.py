@@ -3,7 +3,7 @@ import yaml
 import wandb
 import datetime
 from munch import Munch
-import os, sys
+import os, sys, shutil
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
@@ -28,7 +28,7 @@ def main(config, device):
     args.device = device
     
     now = datetime.datetime.now()
-    timestamp = now.strftime("%d-%m-%Y_%H-%M-%S") 
+    timestamp = now.strftime("%Y%m%d_%H%M%S")
     
     if args.name is None:
         key_params = [
@@ -45,7 +45,13 @@ def main(config, device):
     print(f"Generated run name: {run_name}")
     
     wandb.login(key="ab888ce1f2f170f823dedfc2ee7cae69cdd33ee0") # hardcoded
-    wandb.init(project=args.project, config=args, name=run_name, mode="offline")
+    wandb.init(
+        project=args.project, 
+        config=args, 
+        name=run_name,
+        id=run_name,
+        mode="offline"
+    )
 
     pipe = model_registry[args.model_name].from_pretrained(device=device)
     SolverClass = solver_registry[args.solver]

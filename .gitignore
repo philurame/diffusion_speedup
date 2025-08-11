@@ -1,6 +1,7 @@
 # Recursuve ignorance
 __pycache__/
 wandb/
+.neptune/
 
 # Ignore model weights and pickle files
 *.pt

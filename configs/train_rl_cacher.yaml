@@ -1,5 +1,5 @@
 name: null
-project: "reinforce_cacher"
+project: "thecrazymage/reinforce-cacher"
 
 model_name: "REINFORCE_CACHER"
 metric: "patched-lpips"
@@ -7,7 +7,7 @@ solver: "DDIM"
 scheduler: "LINEAR"
 baseline_name: "DEEPCACHE3"
 
-epochs: 100
+epochs: 300
 train_batch_size: 8
 val_batch_size: 8
 max_samples: 64

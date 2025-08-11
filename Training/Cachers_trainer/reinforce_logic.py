@@ -1,6 +1,7 @@
 import torch
 import numpy as np
-import wandb
+# import wandb
+from neptune.types import File
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from collections import deque
@@ -8,13 +9,15 @@ from collections import deque
 import gc
 import sys
 import os
+import io
+from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
-  sys.path.insert(0, ROOT)
+    sys.path.insert(0, ROOT)
     
 from Training.models import seed_everything
-from training_cachers.loss_cachers import PatchedLPIPS
+from Training.Cachers_trainer.loss_cachers import PatchedLPIPS
 
 def init_logits(args):
     
@@ -114,26 +117,35 @@ def top_k_log_prob(logits, perturbed_logits, k):
     return indices[k:] + 1, log_prob
 
 
-def log_train(logits, loss, logprobs, before_baseline, grad_mean, scheduler, step, args):
+def log_train(logits, loss, logprobs, before_baseline, grad_mean, scheduler, step, args, run):
+    # for i in range(len(logits)):
+    #     wandb.log({
+    #         f'logit #{i+1}': logits[i].item()
+    #     }, step=step)
     for i in range(len(logits)):
-        wandb.log({
-            f'logit #{i+1}': logits[i].item()
-        }, step=step)
+        # run[f'logits/logit_{i+1}'].log(logits[i].item(), step=step)
+        run[f'logits/logit_{i+1}'].append(logits[i].item(), step=step)
         
     grad_norm = logits.grad.data.norm(2).item()
     grad_mean.append(grad_norm)
     
-    wandb.log({
-        'train loss': loss.item(),
-        f'train {args.metric} before baseline': before_baseline.item(),
-        'log prob': logprobs.mean().item(),
-        'grad norm': grad_norm,
-        'grad moving average': np.nanmean(grad_mean),
-        'lr': scheduler.get_last_lr()[0]
-    }, step=step)
+    # wandb.log({
+    #     'train loss': loss.item(),
+    #     f'train {args.metric} before baseline': before_baseline.item(),
+    #     'log prob': logprobs.mean().item(),
+    #     'grad norm': grad_norm,
+    #     'grad moving average': np.nanmean(grad_mean),
+    #     'lr': scheduler.get_last_lr()[0]
+    # }, step=step)
+    run["train/loss"].append(float(loss.item()), step=step)
+    run[f"train/{args.metric}_before_baseline"].append(float( before_baseline.item()), step=step)
+    run["train/log_prob_mean"].append(float(logprobs.mean().item()), step=step)
+    run["train/grad_norm"].append(float(grad_norm), step=step)
+    run["train/grad_moving_average"].append(float(np.nanmean(grad_mean)), step=step)
+    run["train/lr"].append(float(scheduler.get_last_lr()[0]), step=step)
 
 
-def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_images, baseline_imgs, metric, step, args, display_k=4):
+def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_images, baseline_imgs, metric, step, args, run, display_k=4):
     
     def concat_images(orig_imgs, gen_imgs, baseline_imgs):
         col_orig     = torch.cat(orig_imgs.unbind(0), dim=1).cpu()
@@ -168,30 +180,51 @@ def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_
 
     baseline = baseline_imgs[-len(original):]
 
-    val_images = []
+    # val_images = []
     img1 = concat_images(
         original[:display_k],
         generated[:display_k],
         baseline[:display_k]
     )
-    val_images.append(
-        wandb.Image(
-            img1,
-            caption=f"original vs generated vs {args.baseline_name.lower()} 1, step {step}"
-        )
-    )
+    # val_images.append(
+    #     wandb.Image(
+    #         img1,
+    #         caption=f"original vs generated vs {args.baseline_name.lower()} 1, step {step}"
+    #     )
+    # )
     img2 = concat_images(
         original[-display_k:],
         generated[-display_k:],
         baseline[-display_k:]
     )
-    val_images.append(
-        wandb.Image(
-            img2,
-            caption=f"original vs generated vs {args.baseline_name.lower()} 2, step {step}"
-        )
+    # val_images.append(
+    #     wandb.Image(
+    #         img2,
+    #         caption=f"original vs generated vs {args.baseline_name.lower()} 2, step {step}"
+    #     )
+    # )
+
+    img1_to_log = (img1 * 255).round().astype(np.uint8)
+    img2_to_log = (img2 * 255).round().astype(np.uint8)
+
+    def resize_image(img_array, target_size=(256, 256)):
+        img = Image.fromarray(img_array)
+        resized_img = img.resize(target_size, resample=Image.LANCZOS)
+        return np.array(resized_img)
+
+    resized_img1 = resize_image(img1_to_log, target_size=(1536, 2048))
+    resized_img2 = resize_image(img2_to_log, target_size=(1536, 2048))
+
+    run['val/images'].append(
+        File.as_image(resized_img1),
+        description=f"original vs generated vs {args.baseline_name.lower()} 1, step {step}"
     )
-    
+
+    run['val/images'].append(
+        File.as_image(resized_img2),
+        description=f"original vs generated vs {args.baseline_name.lower()} 2, step {step}"
+    )
+
     fig, ax = plt.subplots()
     steps = [t not in ts for t in range(args.student_nfe)]
     ax.plot(range(args.student_nfe), steps)
@@ -200,12 +233,15 @@ def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_
         ax.axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
         ax.scatter(pos, 1, color='red', s=50, zorder=10)
     ax.set_xticks(range(args.student_nfe))
-    wandb.log({
-        f'val {args.metric}': metric_value / count,
-        "val images": val_images,
-        "timesteps plot": wandb.Image(fig, caption=f"Timesteps, step {step}"),
-    }, step=step)
+    # wandb.log({
+    #     f'val {args.metric}': metric_value / count,
+    #     "val images": val_images,
+    #     "timesteps plot": wandb.Image(fig, caption=f"Timesteps, step {step}"),
+    # }, step=step)
+    run['val/timesteps_plot'].upload(fig)
     plt.close(fig)
+
+    run[f'val/{args.metric}'].append(float(metric_value / count), step=step)
 
 
 def generate_data(pipe, baseline_pipe, train_dataloader, val_dataloader, train_noise, val_noise, args):
@@ -289,7 +325,8 @@ def reinforce_training_loop(
     train_dataloader,
     val_dataloader,
     metric_name,
-    args
+    args,
+    run
 ):
     
     seed_everything()
@@ -298,7 +335,6 @@ def reinforce_training_loop(
     latent_size = pipe.unet.config.sample_size
     if metric_name.lower() == "patched-lpips":
         metric = PatchedLPIPS(device=pipe.device)
-
 
     val_noise_path = os.path.join(ROOT, "DATA", f"val_noise_{args.val_batch_size}.pt")
     if os.path.exists(val_noise_path):
@@ -354,7 +390,7 @@ def reinforce_training_loop(
             log_validation(
                 pipe, helper, logits, val_noise, 
                 val_dataloader, teacher_val_images, baseline_val_images,
-                metric, epoch * len(train_dataloader), args
+                metric, epoch * len(train_dataloader), args, run
             )
         
         for batch_idx, anns in tqdm(enumerate(train_dataloader), 'Training', leave=False):
@@ -402,7 +438,7 @@ def reinforce_training_loop(
             
             log_train(
                 logits, loss, logprobs, metrics_mean.mean(), 
-                grad_mean, scheduler, global_step, args
+                grad_mean, scheduler, global_step, args, run
             )
         
         scheduler.step()

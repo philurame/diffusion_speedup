@@ -2,7 +2,6 @@ from registries import model_registry
 from lib.models.SDXL.sdxl import BaseSDXL
 from DeepCache import DeepCacheSDHelper
 
-
 @model_registry.add_to_registry("DEEPCACHE2")
 class DEEPCACHE3(BaseSDXL):
   @classmethod

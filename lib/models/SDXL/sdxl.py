@@ -8,10 +8,10 @@ class BaseSDXL(StableDiffusionXLPipeline):
     device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
     pipe = super().from_pretrained(
       "stabilityai/stable-diffusion-xl-base-1.0", 
-      cache_dir = "/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/SDXL_FILES",
+      cache_dir = "/home/jovyan/maliev/DIFFUSION_SPEEDUP/DATA/SDXL_FILES",
       torch_dtype=torch.float16 if half else torch.float32,
       variant="fp16" if half else None,
-      local_files_only=True # use True for HSE cluster
+      local_files_only=False # use True for HSE cluster
     ).to(device)
     if not half: pipe.text_encoder_2.to(torch.float32)
     pipe.scheduler_config = {

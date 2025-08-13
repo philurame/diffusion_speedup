@@ -1,0 +1,41 @@
+nfe: 25
+model: HUNYUAN
+epochs: 400
+img_log_interval: 1
+
+loss: 
+  name: LATENT-L1 #IQ-AQ-MS
+  coeffs: [1,1,1]
+
+metric:
+  name: VBENCH
+  period: 1
+
+rl:
+  train: true
+  lr: 0.01
+  num_samples: 3
+  solver_sigma: -4
+  clip_grad_norm: 1
+
+solver:
+  train: false
+  teacher: FLOW2-LOG_FLOW_35
+  guide: FLOW2-LOG
+  solver: FLOW2-LOG
+  lr: 0.01
+  clip_grad_norm: 1
+
+timesteps:
+  train: true
+  init_method: flow9
+  param_method: cumprod
+  lr: 0.01
+  clip_grad_norm: 1
+
+dataset:
+  train_size: 100
+  batch_size: 10
+  mini_batch_size: 1
+  val_size: 10
+  path: /workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/TRAIN_DATA

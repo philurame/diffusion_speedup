@@ -1,4 +1,3 @@
-
 import torch, sys, os
 from transformers import AutoTokenizer, MT5EncoderModel
 
@@ -79,12 +78,15 @@ class BaseSora(DiffusionPipeline):
       "model_name": "sora"
     }
     pipe.is_train = kwargs.get('is_train', False)
+    pipe.latent_dims = (8, 24, 80, 80)
+    pipe.img_dims    = (93, 640, 640, 3) # t h w c
+
+    pipe.max_timestep = 999.5
     return pipe
   
   @property
   def device(self):
     return self._device
-
 
   def __call__(self, *args, **kwargs):
     if self.is_train:
@@ -94,14 +96,15 @@ class BaseSora(DiffusionPipeline):
   
   def _call_impl(
     self,
-    prompt: str,
+    prompt,
     num_inference_steps = 50,
     timesteps = None,
-    num_frames = None,
+    num_frames = 93,
     height = 640,
     width = 640,
     output_type = "latent",
     max_sequence_length: int = 512,
+    sigmas = None,
     **kwargs
     ):
 
@@ -110,7 +113,6 @@ class BaseSora(DiffusionPipeline):
     guidance_scale = kwargs.get('guidance_scale', 7.5)
     do_classifier_free_guidance = guidance_scale > 0
         
-    num_frames = num_frames or (self.transformer.config.sample_size_t - 1) * self.vae.vae_scale_factor[0] + 1
     height = height or self.transformer.config.sample_size[0] * self.vae.vae_scale_factor[1]
     width = width or self.transformer.config.sample_size[1] * self.vae.vae_scale_factor[2]
 
@@ -147,7 +149,7 @@ class BaseSora(DiffusionPipeline):
       text_encoder_index=0,
     )
       
-    timesteps, num_inference_steps = self.retrieve_timesteps(num_inference_steps, device, timesteps)
+    timesteps, num_inference_steps = self.retrieve_timesteps(num_inference_steps, timesteps, sigmas, device, **kwargs)
 
     latents = self.prepare_latents(
       batch_size = batch_size * kwargs.get('num_samples_per_prompt', 1),
@@ -240,17 +242,23 @@ class BaseSora(DiffusionPipeline):
     return new_latents
 
 
-  def retrieve_timesteps(self,num_inference_steps=None, device=None, timesteps=None, **kwargs):
+  def retrieve_timesteps(self, num_inference_steps=None, timesteps=None, sigmas=None, device=None, **kwargs):
     '''scheduler.set_timesetps(...)'''
-    if timesteps is not None:
-      self.scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
-      timesteps = self.scheduler.timesteps
+    device = self.device if device is None else device
+    if timesteps is not None or sigmas is not None:
+      self.scheduler.set_timesteps(timesteps=timesteps, device=device, sigmas=sigmas, **kwargs)
+      unet_timesteps = self.scheduler.timesteps
       num_inference_steps = len(timesteps)
     else:
       self.scheduler.set_timesteps(num_inference_steps=num_inference_steps, device=device, **kwargs)
-      timesteps = self.scheduler.timesteps
+      unet_timesteps = self.scheduler.timesteps
     
-    return timesteps, num_inference_steps
+    if getattr(self.scheduler, 'unet_timesteps', None) is not None:
+      unet_timesteps = self.scheduler.unet_timesteps
+    if kwargs.get('unet_timesteps', None) is not None:
+      unet_timesteps = kwargs['unet_timesteps']
+    
+    return unet_timesteps, num_inference_steps
 
   
 
@@ -383,7 +391,23 @@ class BaseSora(DiffusionPipeline):
     return prompt_embeds, negative_prompt_embeds, prompt_attention_mask, negative_prompt_attention_mask
 
 
-  def prepare_latents(self, batch_size, num_channels_latents, num_frames, height, width, dtype, device, generator, latents=None):
+  def prepare_latents(
+    self,
+    batch_size=1,
+    num_channels_latents=None,
+    num_frames=93,
+    height=640,
+    width=640,
+    dtype=None,
+    device=None,
+    generator=None,
+    latents=None,
+    ):
+    num_channels_latents = self.transformer.config.in_channels if num_channels_latents is None else num_channels_latents
+    dtype = self.transformer.dtype if dtype is None else dtype
+    device = self.device if device is None else device
+
+
     shape = (
       batch_size,
       num_channels_latents,

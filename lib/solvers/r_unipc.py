@@ -1,4 +1,5 @@
 from registries import solver_registry
+from lib.solvers.mixin_solver import SolverMixin
 import torch
 
 @solver_registry.add_to_registry("UNIPC3")
@@ -9,10 +10,8 @@ class UNIPC3:
     solver_type = "bh2"
 
     def step(self, model_output, sample=None, **kwargs):
-        if kwargs.get("prediction_type", "epsilon") == "v_prediction":
-          sigma_t = self.sigmas[self.step_index]
-          alpha_t = self.sigma_to_alpha_t(sigma_t)
-          model_output = alpha_t * (sample * sigma_t + model_output)
+        prediction_type = kwargs.get("prediction_type", "epsilon")
+        model_output = self.epsilon_output(model_output, sample, prediction_type)
     
         # 1. Convert model_output once
         x0_pred = self._convert_model_output(model_output, sample)
@@ -128,14 +127,14 @@ class UNIPC2(UNIPC3):
   lower_order_final = True
   solver_type = "bh2"
 
-@solver_registry.add_to_registry("UNIPC3(bh1)")
+@solver_registry.add_to_registry("UNIPC3-1")
 class UNIPC3_(UNIPC3):
   order = 3
   is_trainable = False
   lower_order_final = True
   solver_type = "bh1"
 
-@solver_registry.add_to_registry("UNIPC2(bh1)")
+@solver_registry.add_to_registry("UNIPC2-1")
 class UNIPC2_(UNIPC3):
   order = 2
   is_trainable = False
@@ -156,14 +155,14 @@ class UNIPC2H(UNIPC3):
   lower_order_final = False
   solver_type = "bh2"
 
-@solver_registry.add_to_registry("UNIPC3(bh1)-H")
+@solver_registry.add_to_registry("UNIPC3-H1")
 class UNIPC3H_(UNIPC3):
   order = 3
   is_trainable = False
   lower_order_final = False
   solver_type = "bh1"
 
-@solver_registry.add_to_registry("UNIPC2(bh1)-H")
+@solver_registry.add_to_registry("UNIPC2-H1")
 class UNIPC2H_(UNIPC3):
   order = 2
   is_trainable = False

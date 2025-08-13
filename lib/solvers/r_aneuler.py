@@ -1,15 +1,17 @@
 from registries import solver_registry
+from lib.solvers.mixin_solver import SolverMixin
 import torch
 
 @solver_registry.add_to_registry("ANEULER")
-class ANEULER:
+class ANEULER(SolverMixin):
   order = 1
   is_trainable = False
   def step(self, model_output, sample=None, generator=None, **kwargs):
-    if kwargs.get("prediction_type", "epsilon") == "v_prediction":
-      sigma_t = self.sigmas[self.step_index]
-      alpha_t = self.sigma_to_alpha_t(sigma_t)
-      model_output = alpha_t * (sample * sigma_t + model_output)
+    prediction_type = kwargs.get("prediction_type", "epsilon")
+    model_output = self.epsilon_output(model_output, sample, prediction_type)
+    
+    sigma_t = self.sigmas[self.step_index]
+
     # "scale"
     sigma  = self.sigmas[self.step_index]
     sample = sample * ((sigma**2 + 1) ** 0.5)

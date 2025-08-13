@@ -42,6 +42,8 @@ def calc_metrics(metric_names, **data):
 
     gc.collect()
     torch.cuda.empty_cache()
+
+    print(f'{metric_name}: {res_metrics[metric_name]}', flush=True)
   return res_metrics
 
 def seed_everything(seed=42):
@@ -67,7 +69,8 @@ def seed_everything(seed=42):
 @click.option('--metric_names', type=str, required=True, help='list of metrics separated by comma')
 @click.option('--key', type=str, default=None)
 @click.option('--wandb_project_name', type=str, default='DIFFUSION_METRICS')
-@click.option('--max_samples', type=int, default=30_000)
+@click.option('--save_gen', type=int, default=0)
+@click.option('--num_samples', type=int, default=10_000)
 @click.option('--batch_size', type=int, default=16)
 @click.option('--device', type=int, default=-1)
 def main(**kwargs):
@@ -82,11 +85,10 @@ def main(**kwargs):
   device = kwargs['device']
   key = kwargs['key']
   project_name = kwargs['wandb_project_name']
-  max_samples = kwargs['max_samples']
+  save_gen = kwargs['save_gen']
+  num_samples = kwargs['num_samples']
   batch_size = kwargs['batch_size']
   
-  data_path = os.path.join(ROOT, 'DATA')
-
   print(
     '\n'+'#'*50, 
     *[f'{k}={v}' for k, v in kwargs.items()],
@@ -94,13 +96,13 @@ def main(**kwargs):
   )
   sys.stdout.flush()
 
+  device_id = int(device.split(':')[-1]) if ':' in device else 0
+  torch.cuda.set_device(device_id)
+
   data = data_registry[dataset]()
-  prompts = data.prompts[:max_samples]
-  images = data.imgs[:max_samples] if data.imgs is not None else None
+  prompts = data.prompts[:num_samples]
+  images = data.imgs[:num_samples] if data.imgs is not None else None
   
-  if solver not in solver_registry:
-    print('SLOVER NOT IN REGISTRY, REPLACING WITH DDIM')
-    solver = 'DDIM'
   pipe = construct_pipeline(solver, scheduler, model_name, half=True, device=device)
   solver = kwargs['solver']
   
@@ -121,6 +123,13 @@ def main(**kwargs):
       output_type='img'
     )
     gen_imgs[i:i+batch_size] = imgs
+  
+  if save_gen:
+    p_save = os.path.join(ROOT, 'DATA', model_name)
+    p_name = f'{nfe}-{solver}-{scheduler}.pt'
+    if not os.path.exists(p_save):
+      os.makedirs(p_save)
+    torch.save(gen_imgs, os.path.join(p_save, p_name))
   
   gc.collect()
   torch.cuda.empty_cache()

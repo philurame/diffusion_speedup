@@ -1,17 +1,15 @@
 import torch
 from registries import solver_registry
-
+from lib.solvers.mixin_solver import SolverMixin
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 
 
 @solver_registry.add_to_registry("COEF")
-class COEF:
+class COEF(SolverMixin):
   order = 3
   def _step(self, model_output, sample, solver_pred, step_index, **kwargs):
-    if kwargs.get("prediction_type", "epsilon") == "v_prediction":
-      sigma_t = self.sigmas[self.step_index]
-      alpha_t = self.sigma_to_alpha_t(sigma_t)
-      model_output = alpha_t * (sample * sigma_t + model_output)
+    prediction_type = kwargs.get("prediction_type", "epsilon")
+    model_output = self.epsilon_output(model_output, sample, prediction_type)
       
     if step_index == 0: 
       self.train_model_outputs = []

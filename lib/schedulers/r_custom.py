@@ -4,6 +4,8 @@ import torch
 
 @scheduler_registry.add_to_registry("CUSTOM")
 class CustomScheduler(SchedulerMixin):
-   def set_timesteps(self, timesteps, device=None, **kwargs):
-    if not isinstance(timesteps, torch.Tensor): timesteps = torch.tensor(timesteps)
-    self.prepare_solver_data(timesteps, device) 
+   def set_timesteps(self, timesteps, sigmas=None, device=None, **kwargs):
+    if sigmas is not None and not isinstance(sigmas, torch.Tensor): sigmas = torch.tensor(sigmas)
+    self.prepare_solver_data(timesteps, device, sigmas=sigmas) 
+    
+    

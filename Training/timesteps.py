@@ -8,8 +8,6 @@ class TSModel(torch.nn.Module):
   def __init__(self, nfe, param_method, init_method, max_timestep=999.5):
     super().__init__()
     self.max_timestep = max_timestep
-    if param_method not in ['cumprod', 'square']: raise NotImplementedError
-    if init_method not in ['linear', 'leading', 'flow', 'flow9']: raise NotImplementedError
     self.param_method = param_method
     self.init_method  = init_method
 
@@ -51,6 +49,11 @@ class TSModel(torch.nn.Module):
       cum_probs = torch.cumsum(logits**2, dim=0)
       cum_probs = cum_probs / max(cum_probs[-1], 1e-8)
       timesteps = (self.max_timestep - cum_probs * self.max_timestep)[:-1]
+    
+    if self.param_method == 'module':
+      cum_probs = torch.cumsum(logits.abs(), dim=0)
+      cum_probs = cum_probs / max(cum_probs[-1], 1e-8)
+      timesteps = (self.max_timestep - cum_probs * self.max_timestep)[:-1]
 
     return timesteps
 
@@ -76,3 +79,8 @@ class TSModel(torch.nn.Module):
       probs = torch.cat([(self.max_timestep - timesteps) / self.max_timestep, torch.tensor([1.], device=timesteps.device, dtype=timesteps.dtype)]).clone()
       probs[1:] = probs[1:] - probs[:-1]
       return probs ** 0.5
+
+    if self.param_method == 'module':
+      probs = torch.cat([(self.max_timestep - timesteps) / self.max_timestep, torch.tensor([1.], device=timesteps.device, dtype=timesteps.dtype)]).clone()
+      probs[1:] = probs[1:] - probs[:-1]
+      return probs

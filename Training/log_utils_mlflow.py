@@ -37,7 +37,7 @@ def log_epoch(config, timesteps_model, pipe, log_data):
     log_dict.update({f'timesteps/t_{n}': t.item() for n, t in enumerate(timesteps_model.timesteps)})
     log_dict.update({f'unet_timesteps/t_{n}': t.item() for n, t in enumerate(timesteps_model.unet_timesteps)})
 
-  if 'rl_logits' in log_dict:
+  if log_data.get('rl_logits', None):
     log_dict.update({f'logits_rl/logit_{n}': t.item() for n, t in enumerate(log_data['rl_logits'])})
   
   if config.solver.train:

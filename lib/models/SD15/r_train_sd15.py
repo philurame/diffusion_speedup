@@ -33,17 +33,3 @@ class TrainSD15(BaseSD15):
       noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
     new_latents = solver.step(model_output=noise_pred, sample=latents, generator=generator, return_dict=False, latent_dims=self.latent_dims)
     return new_latents
-  
-  def retrieve_timesteps(self,num_inference_steps=None, device=None, timesteps=None, **kwargs):
-    '''scheduler.set_timesetps(...)'''
-    if timesteps is not None:
-      self.scheduler.set_timesteps(timesteps=timesteps, device=device, **kwargs)
-      unet_timesteps = self.scheduler.timesteps
-      num_inference_steps = len(timesteps)
-    elif num_inference_steps is not None:
-      self.scheduler.set_timesteps(num_inference_steps=num_inference_steps, device=device, **kwargs)
-      unet_timesteps = self.scheduler.timesteps
-
-    if kwargs.get('unet_timesteps', None) is not None:
-      unet_timesteps = kwargs['unet_timesteps']
-    return unet_timesteps, num_inference_steps

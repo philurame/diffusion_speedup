@@ -77,7 +77,6 @@ try:
       self.coeffs = coeffs
     
     def forward(self, gen_imgs=None, imgs=None, **kwargs):
-      losses = []
       with torch.no_grad():
         iq_l1 = iq_l1_loss(self.iq_model, gen_imgs, imgs).cpu()
         aq_l1 = aq_l1_loss(self.clip_model, gen_imgs, imgs).cpu()

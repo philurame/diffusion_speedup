@@ -34,11 +34,11 @@ def log_epoch(config, timesteps_model, pipe, log_data):
   log_dict[f'val/{config.loss.name}']   = log_data['val_loss']
 
   if config.timesteps.train:
-    log_dict.update({f'timesteps/t[{n}]': t.item() for n, t in enumerate(timesteps_model.timesteps)})
-    log_dict.update({f'unet_timesteps/t[{n}]': t.item() for n, t in enumerate(timesteps_model.unet_timesteps)})
+    log_dict.update({f'timesteps/t_{n}': t.item() for n, t in enumerate(timesteps_model.timesteps)})
+    log_dict.update({f'unet_timesteps/t_{n}': t.item() for n, t in enumerate(timesteps_model.unet_timesteps)})
 
   if 'rl_logits' in log_dict:
-    log_dict.update({f'logits_rl/logit[{n}]': t.item() for n, t in enumerate(log_data['rl_logits'])})
+    log_dict.update({f'logits_rl/logit_{n}': t.item() for n, t in enumerate(log_data['rl_logits'])})
   
   if config.solver.train:
     if isinstance(pipe.scheduler.train_params, torch.Tensor):
@@ -47,7 +47,7 @@ def log_epoch(config, timesteps_model, pipe, log_data):
       solver_params = [p.detach().cpu().numpy().tolist() for p in pipe.scheduler.train_params]
     log_list(name=f"params_{log_data['global_step']}", data=solver_params, artifact_dir="artifacts/solver")
 
-  log_scalars(log_data, log_data['global_step'])
+  log_scalars(log_dict, log_data['global_step'])
 
   if config.img_log_interval>0 and log_data['epoch'] % config.img_log_interval == 0:
     is_distill_loss = 'L1' in config.loss.name
@@ -59,9 +59,9 @@ def log_epoch(config, timesteps_model, pipe, log_data):
     val_imgs_log     = log_data['val_imgs_log']
 
     # assert train_imgs_log, "train_imgs_log should not be empty"
-    assert val_imgs_log,   "val_imgs_log should not be empty"
+    assert val_imgs_log, "val_imgs_log should not be empty"
     
-    # if it is video, take first frame: (t h w c) -> (c h w)
+    # if it is video, take first frame: (b t h w c) -> (b c h w)
     if train_imgs_log and train_imgs_log[0].squeeze().dim() > 3:
       train_imgs_log = [img[0].permute(2, 0, 1) for img in train_imgs_log]
       if is_distill_loss:
@@ -105,10 +105,11 @@ def mlflow_log_imgs(imgs_student, imgs_teacher=None, name="", downscale=256):
       imgs_teacher = torch.nn.functional.interpolate(
         imgs_teacher, size=(downscale, downscale), mode='bilinear', align_corners=False
       ).squeeze()
-
+      
   imgs_student = imgs_student.to(torch.float32)
   if imgs_teacher is not None:
     imgs_teacher = imgs_teacher.to(torch.float32)
+
 
   n_cols = 2 if imgs_teacher is not None else 1
   fig, ax = plt.subplots(1, n_cols, figsize=(5 * n_cols, 5))
@@ -135,7 +136,9 @@ def vis_grid(imgs_row, ax=None):
   nrow = int(np.around(np.sqrt(imgs_row.shape[0])))
   imgs_grid = make_grid(imgs_row, nrow=nrow).permute(1, 2, 0).numpy()
 
-  imgs_grid = imgs_grid / 2 + 0.5
+  if imgs_grid.min() < -0.1:
+    imgs_grid = imgs_grid / 2 + 0.5
+
   imgs_grid = np.clip(imgs_grid, 0, 1)
   if ax is None:
     plt.imshow(imgs_grid)

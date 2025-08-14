@@ -5,7 +5,6 @@ import os, uuid, yaml, click, mlflow
 from omegaconf import OmegaConf
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
-from trainer import Trainer
 from log_utils_mlflow import log_config, install_mlflow_guards
 
 def flatten_cfg(d, prefix=""):
@@ -66,6 +65,7 @@ def main(config: str, device: str):
   mlflow.set_tracking_uri("file:/workspace-SR008.fs2/philurame/MLFLOW")
   mlflow.set_experiment(f"{exp_name}")
 
+  from trainer import Trainer
   
   with mlflow.start_run(run_name=run_name, tags=tags, log_system_metrics=True) as run:
     install_mlflow_guards() # ends run if killed

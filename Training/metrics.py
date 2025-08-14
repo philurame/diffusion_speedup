@@ -26,7 +26,7 @@ class VBENCH:
   def __init__(self, run_id):
     vdir_path    = '/workspace-SR008.fs2/philurame/VMODEL/VIDEOS_TRAIN'
     save_prompt_path = '/workspace-SR008.fs2/philurame/VMODEL/PROMPTS_TRAIN'
-    prompts_path = '/workspace-SR008.fs2/philurame/VMODEL/huawei_prompts.txt'
+    prompts_path = '/workspace-SR008.fs2/philurame/DIFFUSION_SPEEDUP/DATA/hunyuan_prompts.txt'
 
     self.vbench_shell_path = "/workspace-SR008.fs2/philurame/scripts/help_vbench_train.sh"
 

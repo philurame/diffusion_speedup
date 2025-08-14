@@ -8,7 +8,7 @@ from losses  import loss_registry
 from metrics import metric_registry
 from models import construct_pipeline, seed_everything
 from timesteps import TSModel
-from log_utils_mlflow import log_epoch, log_scalars, log_list
+from log_utils_mlflow import log_epoch, log_scalars
 from optim_utils import get_optimizer, grad_clip
 from rl import rl_sample, RLLoss
 import time, torch, tqdm, gc
@@ -59,8 +59,8 @@ class Trainer:
         'val_loss': val_loss,
         'train_imgs_log': train_imgs_log, 
         'val_imgs_log': val_imgs_log, 
-        'train_imgs_teacher': self.train_dataset[:min(len(train_imgs_log), 9)]['imgs'].float(),
-        'val_imgs_teacher': self.val_dataset[:min(len(val_imgs_log), 9)]['imgs'].float(),
+        'train_imgs_teacher': self.train_dataset[:min(len(train_imgs_log), 9)]['imgs'],
+        'val_imgs_teacher': self.val_dataset[:min(len(val_imgs_log), 9)]['imgs'],
         'time_train': time_curr - time_last,
         'rl_logits': self.rl_logits,
         'global_step': self.global_step,
@@ -102,7 +102,9 @@ class Trainer:
 
           gen_imgs_samples = None
           if 'LATENT' not in self.config.loss.name:
-            gen_imgs_samples = [self.pipe.decode_latents(gen_latent)*2-1 for gen_latent in gen_latents_samples]
+            gen_imgs_samples = [self.pipe.decode_latents(gen_latent) for gen_latent in gen_latents_samples]
+            if gen_imgs_samples[0].dtype == torch.uint8:
+              gen_imgs_samples = [gen_imgs.float() / 255 for gen_imgs in gen_imgs_samples]
             if len(train_imgs_log) < n_imgs_log:
               train_imgs_log.append(gen_imgs_samples[0].squeeze().cpu().float())
 
@@ -127,7 +129,7 @@ class Trainer:
 
           gen_imgs = None
           if 'LATENT' not in self.config.loss.name:
-            gen_imgs = self.pipe.decode_latents(gen_latents)*2-1
+            gen_imgs = self.pipe.decode_latents(gen_latents) # MUST be in [0,1]
             if len(train_imgs_log) < n_imgs_log:
               train_imgs_log.append(gen_imgs.squeeze().cpu().float())
 
@@ -174,7 +176,14 @@ class Trainer:
 
       gen_imgs = None
       if self.config.img_log_interval>0:
-        gen_imgs = self.pipe.decode_latents(gen_latents) * 2 - 1
+        gen_imgs = self.pipe.decode_latents(gen_latents)
+        if gen_imgs.dtype == torch.uint8:
+          gen_imgs = gen_imgs.float() / 255
+
+        # assert gen_imgs.min()>-0.1
+        # assert gen_imgs.max()<1.1
+        # gen_imgs = gen_imgs * 2 - 1
+        
         if len(val_imgs_log) < n_imgs_log:
           val_imgs_log.append(gen_imgs.squeeze().cpu().float())
 

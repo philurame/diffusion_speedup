@@ -20,6 +20,13 @@ class TrainDataset(Dataset):
     self.data['latents'] = data['latents'][:size]
     self.data['imgs']    = data['imgs'][:size]
 
+    # preprocess imgs to be in [0,1]
+    if self.data['imgs'].dtype == torch.uint8:
+      self.data['imgs'] = self.data['imgs'].float()/255
+    if self.data['imgs'].min() < -1.1: #[-1, 1]
+      self.data['imgs'] = self.data['imgs']/2 + 0.5
+    assert self.data['imgs'].max() < 2
+
     self.transfer_device = transfer_device
 
   def __len__(self):

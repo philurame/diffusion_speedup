@@ -9,7 +9,6 @@ from collections import deque
 import gc
 import sys
 import os
-import io
 from PIL import Image
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -137,12 +136,21 @@ def log_train(logits, loss, logprobs, before_baseline, grad_mean, scheduler, ste
     #     'grad moving average': np.nanmean(grad_mean),
     #     'lr': scheduler.get_last_lr()[0]
     # }, step=step)
-    run["train/loss"].append(float(loss.item()), step=step)
-    run[f"train/{args.metric}_before_baseline"].append(float( before_baseline.item()), step=step)
-    run["train/log_prob_mean"].append(float(logprobs.mean().item()), step=step)
-    run["train/grad_norm"].append(float(grad_norm), step=step)
-    run["train/grad_moving_average"].append(float(np.nanmean(grad_mean)), step=step)
-    run["train/lr"].append(float(scheduler.get_last_lr()[0]), step=step)
+    # run["train/loss"].append(float(loss.item()), step=step)
+    # run[f"train/{args.metric}_before_baseline"].append(float( before_baseline.item()), step=step)
+    # run["train/log_prob_mean"].append(float(logprobs.mean().item()), step=step)
+    # run["train/grad_norm"].append(float(grad_norm), step=step)
+    # run["train/grad_moving_average"].append(float(np.nanmean(grad_mean)), step=step)
+    # run["train/lr"].append(float(scheduler.get_last_lr()[0]), step=step)
+
+    run["train"].append({
+        'train loss': loss.item(),
+        f'train {args.metric} before baseline': before_baseline.item(),
+        'log prob': logprobs.mean().item(),
+        'grad norm': grad_norm,
+        'grad moving average': np.nanmean(grad_mean),
+        'lr': scheduler.get_last_lr()[0]
+    }, step=step)
 
 
 def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_images, baseline_imgs, metric, step, args, run, display_k=4):
@@ -215,14 +223,16 @@ def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_
     resized_img1 = resize_image(img1_to_log, target_size=(1536, 2048))
     resized_img2 = resize_image(img2_to_log, target_size=(1536, 2048))
 
-    run['val/images'].append(
+    run['val/images/variant_1'].append(
         File.as_image(resized_img1),
-        description=f"original vs generated vs {args.baseline_name.lower()} 1, step {step}"
+        description=f"original vs generated vs {args.baseline_name.lower()} 1, step {step}",
+        step=step
     )
 
-    run['val/images'].append(
+    run['val/images/variant_2'].append(
         File.as_image(resized_img2),
-        description=f"original vs generated vs {args.baseline_name.lower()} 2, step {step}"
+        description=f"original vs generated vs {args.baseline_name.lower()} 2, step {step}",
+        step=step
     )
 
     fig, ax = plt.subplots()
@@ -233,12 +243,13 @@ def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_
         ax.axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
         ax.scatter(pos, 1, color='red', s=50, zorder=10)
     ax.set_xticks(range(args.student_nfe))
+    ax.set_title(f"Timesteps, step {step}")
     # wandb.log({
     #     f'val {args.metric}': metric_value / count,
     #     "val images": val_images,
     #     "timesteps plot": wandb.Image(fig, caption=f"Timesteps, step {step}"),
     # }, step=step)
-    run['val/timesteps_plot'].upload(fig)
+    run['val/timesteps_plot'].append(fig, step=step)
     plt.close(fig)
 
     run[f'val/{args.metric}'].append(float(metric_value / count), step=step)

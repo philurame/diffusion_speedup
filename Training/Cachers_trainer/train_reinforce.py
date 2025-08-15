@@ -57,6 +57,7 @@ def main(config, device):
     my_token='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI5MmRiMzUyNy0xMmIwLTQ1NDUtODQyYS1iNTMxMDk0ZmNkMzEifQ=='
     run = neptune.init_run(project=args.project, api_token=my_token, name=run_name)
     run["parameters"] = dict(args)
+    run["artifacts/config.yaml"].upload(config)
 
     pipe = model_registry[args.model_name].from_pretrained(device=device)
     SolverClass = solver_registry[args.solver]

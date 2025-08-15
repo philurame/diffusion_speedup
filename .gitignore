@@ -2,6 +2,7 @@
 __pycache__/
 wandb/
 .neptune/
+legacy/
 
 # Ignore model weights and pickle files
 *.pt

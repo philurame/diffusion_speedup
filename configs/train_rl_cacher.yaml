@@ -17,9 +17,9 @@ teacher_nfe: 25
 student_nfe: 25
 num_steps: 9
 num_samples: 2
-eval_freq: 1
+eval_freq: 10
 
-lr: 0.01
+lr: 0.03
 gamma: 1 # we don't need scheduler for now
 same_train_noise: True
 init_logits: "deepcache-3"

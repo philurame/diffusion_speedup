@@ -16,7 +16,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
     
 from Training.models import seed_everything
-from Training.Cachers_trainer.loss_cachers import PatchedLPIPS
+from Training.cachers.loss_cachers import PatchedLPIPS
 
 def init_logits(args):
     
@@ -257,7 +257,7 @@ def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_
 
 def generate_data(pipe, baseline_pipe, train_dataloader, val_dataloader, train_noise, val_noise, args):
 
-    teacher_train_data_path = os.path.join(ROOT, "DATA", f"teacher_train_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
+    teacher_train_data_path = os.path.join(ROOT, "DATA", "cachers", "train_data", f"teacher_train_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
     if not os.path.exists(teacher_train_data_path):
         with torch.no_grad():
             teacher_outputs_train = []
@@ -280,7 +280,7 @@ def generate_data(pipe, baseline_pipe, train_dataloader, val_dataloader, train_n
         print(f"\nFound ready teacher train data: {teacher_train_data_path}.\n")
 
 
-    teacher_val_data_path = os.path.join(ROOT, "DATA", f"teacher_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
+    teacher_val_data_path = os.path.join(ROOT, "DATA", "cachers", "train_data", f"teacher_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
     if not os.path.exists(teacher_val_data_path):
         with torch.no_grad():
             teacher_outputs_val = []
@@ -303,7 +303,7 @@ def generate_data(pipe, baseline_pipe, train_dataloader, val_dataloader, train_n
         print(f"\nFound ready teacher val data: {teacher_val_data_path}.\n")
 
 
-    baseline_val_data_path = os.path.join(ROOT, "DATA", f"{args.baseline_name}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
+    baseline_val_data_path = os.path.join(ROOT, "DATA", "cachers", "train_data", f"{args.baseline_name}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt")
     if not os.path.exists(baseline_val_data_path):
         with torch.no_grad():
             baseline_outputs_val = []
@@ -347,7 +347,7 @@ def reinforce_training_loop(
     if metric_name.lower() == "patched-lpips":
         metric = PatchedLPIPS(device=pipe.device)
 
-    val_noise_path = os.path.join(ROOT, "DATA", f"val_noise_{args.val_batch_size}.pt")
+    val_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises", f"val_noise_{args.val_batch_size}.pt")
     if os.path.exists(val_noise_path):
         val_noise = torch.load(val_noise_path, weights_only=True).to(args.device)
     else:
@@ -359,7 +359,7 @@ def reinforce_training_loop(
         )
 
     if args.same_train_noise:
-        train_noise_path = os.path.join(ROOT, "DATA", f"train_noise_{args.train_batch_size}.pt")
+        train_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises", f"train_noise_{args.train_batch_size}.pt")
         if os.path.exists(train_noise_path):
             train_noise = torch.load(train_noise_path, weights_only=True).to(args.device)
         else:
@@ -453,3 +453,9 @@ def reinforce_training_loop(
             )
         
         scheduler.step()
+
+    log_validation(
+        pipe, helper, logits, val_noise, 
+        val_dataloader, teacher_val_images, baseline_val_images,
+        metric, epoch * len(train_dataloader), args, run
+        )

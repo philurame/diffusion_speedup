@@ -7,7 +7,7 @@ import os, torch, tqdm
 
 @metric_registry.add_to_registry('IQ')
 class IQMetric:
-  model_name_or_path='/home/jovyan/.cache/vbench/pyiqa_model/musiq_spaq_ckpt-358bb6af.pth'
+  model_name_or_path='/home/jovyan/maliev/DIFFUSION_SPEEDUP/DATA/image_quality/musiq_spaq_ckpt-358bb6af.pth'
   @torch.inference_mode()
   def __call__(self, imgs_gen, batch_size=64, device=None, verbose=False, **kwargs):
     os.environ['TOKENIZERS_PARALLELISM'] = 'false'

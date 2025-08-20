@@ -8,7 +8,8 @@ import clip, torch, tqdm
 
 @metric_registry.add_to_registry('AQ')
 class AQMetric:
-  model_name_or_path='/home/jovyan/.cache/vbench/aesthetic_model/emb_reader/sa_0_4_vit_l_14_linear.pth'
+  # model_name_or_path='/home/jovyan/.cache/vbench/aesthetic_model/emb_reader/sa_0_4_vit_l_14_linear.pth'
+  model_name_or_path='/home/jovyan/maliev/DIFFUSION_SPEEDUP/DATA/aesthetic_model/emb_reader/sa_0_4_vit_l_14_linear.pth'
   @torch.inference_mode()
   def __call__(self, imgs_gen, batch_size=64, device=None, verbose=False, **kwargs):
     device = device or imgs_gen.device

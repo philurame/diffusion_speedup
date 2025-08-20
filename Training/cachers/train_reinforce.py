@@ -17,7 +17,7 @@ from Training.models import seed_everything
 from lib.datasets.r_coco import COCO_SHORT, COCO_LONG
 from torch.utils.data import DataLoader
 
-from Training.Cachers_trainer.reinforce_logic import reinforce_training_loop
+from Training.cachers.reinforce_logic import reinforce_training_loop
 
 @click.command()
 @click.option("--config", type=str, required=True, help="Path tмне o YAML config file")

@@ -102,7 +102,7 @@ def main(**kwargs):
   data = data_registry[dataset]()
   prompts = data.prompts[:num_samples]
   images = data.imgs[:num_samples] if data.imgs is not None else None
-  
+
   pipe = construct_pipeline(solver, scheduler, model_name, half=True, device=device)
   solver = kwargs['solver']
   

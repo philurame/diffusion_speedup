@@ -27,6 +27,9 @@ class PatchedLPIPS:
     
     @torch.no_grad()
     def calculate(self, original, generated, reduction='none'):
+        '''
+            original, generated must be in [-1, 1] (https://pypi.org/project/lpips/)
+        '''
 
         B = original.shape[0]
         
@@ -36,8 +39,8 @@ class PatchedLPIPS:
         original_patches = self.extract_patches(original)
         generated_patches = self.extract_patches(generated)
         
-        original_patches = (original_patches.clamp(-1, 1) + 1) / 2
-        generated_patches = (generated_patches.clamp(-1, 1) + 1) / 2
+        original_patches = original_patches.clamp(-1, 1)
+        generated_patches = generated_patches.clamp(-1, 1)
         
         lpips_scores = self.lpips(original_patches, generated_patches)
         lpips_scores = lpips_scores.view(B, -1)  # [B * n_patches]

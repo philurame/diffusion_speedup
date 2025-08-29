@@ -5,7 +5,7 @@ import click
 import torch
 import random
 import numpy as np
-import neptune
+import csv
 from datetime import datetime 
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -52,7 +52,8 @@ def calc_metrics(metric_names, **data):
     print(f'{metric_name}: {res_metrics[metric_name]}', flush=True)
   return res_metrics
 
-def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, data_path, nfe, gs, batch_size):
+
+def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, data_path, nfe, gs):
 
     seed_everything()
 
@@ -65,17 +66,13 @@ def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, data_pa
 
         outputs = []
         with torch.inference_mode():
-            for batch_idx, anns in enumerate(tqdm(test_dataloader)):
-                batch_start = batch_idx * batch_size
-                batch_end = batch_start + batch_size
-                current_noise = test_noise[batch_start:batch_end]
-                
+            for anns in tqdm(test_dataloader):
                 with helper.inference(timesteps=ts_to_skip):
                     gen = pipe(
                         anns,
                         num_inference_steps=nfe,
                         guidance_scale=gs,
-                        latents=current_noise,
+                        latents=test_noise[:len(anns)],
                         output_type="pt"
                     )
                 outputs.append(gen)
@@ -87,7 +84,6 @@ def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, data_pa
 
     else:
         generated = torch.load(data_path, weights_only=True)
-        assert len(test_noise) == len(generated)
         print(f"\tDATA LOADED FROM: {data_path}")
 
     return generated
@@ -103,6 +99,7 @@ def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, data_pa
 @click.option('--metric_names', type=str,   required=True, default="LPIPS,PLPIPS,L1,AQ,IQ,HPS,CLIP,ImageReward",  help='list of metrics separated by comma')
 @click.option("--not_cached",   type=str,   required=True, default="",)
 @click.option("--device",       type=str,                  default="cuda")
+@click.option("--run_name",     type=str,                  default=None)
 def main(**kwargs):
 
     model_name          = kwargs['model_name']
@@ -133,7 +130,7 @@ def main(**kwargs):
     test_dataloader = DataLoader(coco.prompts[-test_size:], batch_size=batch_size, shuffle=False)
 
     latent_size = pipe.unet.config.sample_size
-    test_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises",  f"test_noise_{test_size}.pt")
+    test_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises",  f"test_noise_{batch_size}.pt")
     if os.path.exists(test_noise_path):
         test_noise = torch.load(test_noise_path, weights_only=True).to(device)
         print(f"\n\tLOADED NOISE FROM: {test_noise_path}")
@@ -148,15 +145,17 @@ def main(**kwargs):
 
 
     ### TEACHER MODEL
-    teacher_data_path = os.path.join(ROOT, 'DATA', 'cachers', 'eval_data', f"teacher_test_{model_name}_{solver}_{scheduler}_{nfe}_{test_size}.pt")
-    imgs_teacher = generate_data(pipe, helper, [], test_dataloader, test_noise, teacher_data_path, nfe, gs, batch_size)
+    
+    teacher_data_path = os.path.join(ROOT, 'DATA', 'cachers', 'eval_data', f'teacher_{model_name}-{solver}-{scheduler}-{nfe}.pt')
+    imgs_teacher = generate_data(pipe, helper, [], test_dataloader, test_noise, teacher_data_path, nfe, gs)
 
 
     ### CACHED MODEL
+
     all_steps_zero = list(range(nfe))
     ts_to_skip = sorted(set(all_steps_zero) - set(not_cached_steps))
-    student_data_path = os.path.join(ROOT, 'DATA', 'cachers', 'eval_data', f'student_test_{model_name}_{solver}_{scheduler}_{nfe}_{test_size}_{str(not_cached_steps)}.pt')
-    imgs_student = generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, student_data_path, nfe, gs, batch_size)
+    student_data_path = os.path.join(ROOT, 'DATA', 'cachers', 'eval_data', f'{model_name}-{solver}-{scheduler}-{nfe}-{str(not_cached_steps)}.pt')
+    imgs_student = generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, student_data_path, nfe, gs)
 
     del pipe, helper, test_dataloader
     gc.collect()
@@ -172,37 +171,32 @@ def main(**kwargs):
     print(metrics)
 
     ### SAVING RESULTS  
-    test_run_name = f"{model_name}_{solver}_{scheduler}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    my_token='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI5MmRiMzUyNy0xMmIwLTQ1NDUtODQyYS1iNTMxMDk0ZmNkMzEifQ=='
-    metric_run = neptune.init_run(
-        project="thecrazymage/reinforce-metrics",
-        api_token=my_token,
-        name=test_run_name,
-        capture_stdout=False,
-        capture_stderr=False,
-        capture_hardware_metrics=False
-    )
+    csv_path = os.path.join(ROOT, 'DATA', 'cachers', 'eval_data', 'results.csv')
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
 
-    params = {
-        "model_name" : model_name,
-        "solver" : solver,
-        "scheduler" : scheduler, 
-        "teacher_nfe" : nfe,
-        "student_nfe" : nfe,
-        "gs" : gs,
-        "test_size" : test_size,
-        "batch_size" : batch_size,
-        "device" : device,
+    base_fields = ['run_name', 'timestamp', '{model_name}-{solver}-{scheduler}-{nfe}-{gs}', 'test_size', 'not_cached_steps']
+    fieldnames = base_fields + METRIC_COLUMNS
+    
+    row_data = {
+        'run_name': kwargs['run_name'],
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        '{model_name}-{solver}-{scheduler}-{nfe}-{gs}': f"{model_name}-{solver}-{scheduler}-{nfe}-{gs}",
+        'test_size': test_size,
+        'not_cached_steps': str(not_cached_steps) if ts_to_skip else 'all',
     }
 
-    params.update({
-        "cached_timesteps": ts_to_skip,
-        "not_cached_timesteps": not_cached_steps,
-    })
-    metric_run["parameters"] = params
-    metric_run["metrics"] = metrics
+    for m in metric_names:
+        val = metrics.get(m, None)
+        row_data[m] = val
 
-    metric_run.stop()
+    file_exists = os.path.exists(csv_path)
+    with open(csv_path, 'a', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, restval='None')
+        if not file_exists:
+            writer.writeheader()
+        writer.writerow(row_data)
+
+    print(f"\nResults saved to: {csv_path}")
 
 
 if __name__ == "__main__":

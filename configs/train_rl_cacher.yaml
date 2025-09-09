@@ -1,6 +1,4 @@
 name: null
-project: "thecrazymage/reinforce-cacher"
-token: UNK
 
 model_name: "REINFORCE_CACHER"
 metric: "patched-lpips"

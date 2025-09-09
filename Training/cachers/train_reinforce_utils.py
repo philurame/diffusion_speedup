@@ -177,8 +177,7 @@ def log_test(pipe, helper, logits, test_noise, test_prompts, epoch, args, run):
 
     test_run_name = f"TEST_{args.model_name}_{args.solver}_{args.scheduler}__{str(not_cached_steps)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     metric_run = neptune.init_run(
-        project="thecrazymage/reinforce-metrics",
-        api_token=args.token,
+        project="{args.workspace_name}/reinforce-metrics",
         name=test_run_name,
         capture_stdout=False,
         capture_stderr=False,

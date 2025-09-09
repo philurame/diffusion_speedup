@@ -1,6 +1,4 @@
 name: null
-project: "thecrazymage/reinforce-cacher"
-token: eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI5MmRiMzUyNy0xMmIwLTQ1NDUtODQyYS1iNTMxMDk0ZmNkMzEifQ==
 
 model_name: "REINFORCE_CACHER"
 metric: "patched-lpips"

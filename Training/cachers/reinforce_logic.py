@@ -6,34 +6,6 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-def init_logits(args):
-    
-    temp_student_nfe = args.student_nfe - 1 # we never cache first step
-    if args.init_logits == 'ones':
-        logits = torch.ones(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device, requires_grad=True
-        ) 
-    elif  args.init_logits == 'randn':
-        logits = torch.randn(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device, requires_grad=True
-        )
-    elif args.init_logits == 'zeros':
-        logits = torch.zeros(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device, requires_grad=True
-        ) 
-    elif args.init_logits == 'deepcache-3':
-        logits = torch.ones(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device
-        )
-        logits[2::3] *= 0.9 # пересчитываемые логиты должны быть поменьше
-        logits.requires_grad_(True)
-    else:
-        raise ValueError(f"Unknown init_logits type: {args.init_logits}")
-    return logits
 
 def sample_exp(logits, inference=False):
     """

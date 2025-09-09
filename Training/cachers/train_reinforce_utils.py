@@ -20,10 +20,47 @@ if ROOT not in sys.path:
     
 from Training.models import seed_everything
 from Training.cachers.loss_cachers import PatchedLPIPS
-from Training.cachers.reinforce_logic import init_logits, sample_exp, top_k_log_prob
+from Training.cachers.reinforce_logic import sample_exp, top_k_log_prob
 from registries import metric_registry
 
-def log_train(logits, loss, logprobs, before_baseline, grad_mean, scheduler, step, args, run):
+
+def init_logits(args):
+    
+    temp_student_nfe = args.student_nfe - 1 # we never cache first step
+    if args.init_logits == 'ones':
+        logits = torch.ones(               
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device, requires_grad=True
+        ) 
+    elif  args.init_logits == 'randn':
+        logits = torch.randn(               
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device, requires_grad=True
+        )
+    elif args.init_logits == 'zeros':
+        logits = torch.zeros(               
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device, requires_grad=True
+        ) 
+    elif args.init_logits == 'deepcache-3':
+        logits = torch.ones(               
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device
+        )
+        logits[2::3] *= 0.9 # пересчитываемые логиты должны быть поменьше
+        logits.requires_grad_(True)
+    elif args.init_logits == 'deepcache-4':
+        logits = torch.ones(               
+            temp_student_nfe, dtype=torch.float32, 
+            device=args.device
+        )
+        logits[3::4] *= 0.9 # пересчитываемые логиты должны быть поменьше ???
+        logits.requires_grad_(True)
+    else:
+        raise ValueError(f"Unknown init_logits type: {args.init_logits}")
+    return logits
+
+def log_train(logits, loss, logprobs, before_baseline_and_reg, before_baseline, grad_mean, scheduler, step, args, run):
 
     for i in range(len(logits)):
         run[f'logits/logit_{i+1}'].append(logits[i].item(), step=step)
@@ -33,6 +70,7 @@ def log_train(logits, loss, logprobs, before_baseline, grad_mean, scheduler, ste
     
     run["train"].append({
         'train loss': loss.item(),
+        f'train {args.metric} before baseline and regularization': before_baseline_and_reg.item(),
         f'train {args.metric} before baseline': before_baseline.item(),
         'log prob': logprobs.mean().item(),
         'grad norm': grad_norm,
@@ -181,7 +219,8 @@ def log_test(pipe, helper, logits, test_noise, test_prompts, epoch, args, run):
         name=test_run_name,
         capture_stdout=False,
         capture_stderr=False,
-        capture_hardware_metrics=False
+        capture_hardware_metrics=False,
+        mode="offline"
     )
 
     params = unmunchify(args)
@@ -351,8 +390,8 @@ def reinforce_training_loop(
     optim = torch.optim.Adam([logits], args.lr)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, gamma=args.gamma)
     alphas = torch.cat([
-        torch.linspace(args.alpha, 0, args.epochs - 100),
-        torch.zeros(100)
+        torch.linspace(args.alpha, 0, args.warming_entropy_epochs),
+        torch.zeros(args.epochs - args.warming_entropy_epochs)
     ])
 
     teacher_train_images, teacher_val_images, baseline_val_images = generate_init_data(
@@ -407,10 +446,11 @@ def reinforce_training_loop(
                 logprobs[i] = log_prob
                 metrics[i, :] = metric.calculate(original, generated).detach()
             
+            metrics_mean = metrics.mean(dim=0)                                                   # without regularization
             metrics = metrics + alphas[epoch] * logprobs[:, None]                                # add entropy regularizer
 
-            metrics_mean = metrics.mean(dim=0)                                                   # [batch_size]
-            metrics_corrected = (metrics - metrics_mean[None, :]).detach()                       # [num_samples, batch_size]
+            metrics_mean_reg = metrics.mean(dim=0)                                                   # [batch_size]
+            metrics_corrected = (metrics - metrics_mean_reg[None, :]).detach()                       # [num_samples, batch_size]
             
             loss = (metrics_corrected * logprobs[:, None]).mean() * (args.num_samples) / (args.num_samples - 1)
             
@@ -418,10 +458,10 @@ def reinforce_training_loop(
             optim.step()
             
             log_train(
-                logits, loss, logprobs, metrics_mean.mean(), 
+                logits, loss, logprobs, metrics_mean.mean(), metrics_mean_reg.mean(), 
                 grad_mean, scheduler, global_step, args, run
             )
-        
+
         scheduler.step()
 
         if (epoch + 1) % args.test_freq == 0:

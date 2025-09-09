@@ -18,8 +18,10 @@ num_samples: 6
 eval_freq: 10
 test_freq: 100
 
+alpha: 0.1                       # regularization for entropy
+warming_entropy_epochs: 200      # how many epochs we use entropy regularizer 
+
 lr: 0.03
-alpha: 0                      # regularization for entropy
-gamma: 1                      # we don't need scheduler for now
+gamma: 1                       # we don't need scheduler for now
 same_train_noise: True
 init_logits: "deepcache-3"

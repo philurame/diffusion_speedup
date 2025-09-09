@@ -139,7 +139,7 @@ def main(**kwargs):
         print(f"\n\tLOADED NOISE FROM: {test_noise_path}")
     else:
         test_noise = torch.randn(
-            (batch_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=device)
+            (test_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=device)
         torch.save(
             test_noise, 
             test_noise_path

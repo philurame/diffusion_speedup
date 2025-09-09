@@ -231,7 +231,10 @@ def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path,
             generated = torch.cat(outputs, dim=0).cpu()
             if is_test:
                 generated = (generated + 1) * 0.5           # [-1,1] -> [0,1]
+            
+            os.makedirs(os.path.dirname(data_path), exist_ok=True)
             torch.save(generated, data_path)
+            
             print(f"\tDATA CREATED AND SAVED TO: {data_path}")
     
     return generated
@@ -285,6 +288,8 @@ def init_noises(args, latent_size, type, device):
     else:
         train_noise = torch.randn(
             (args.max_samples, 4, latent_size, latent_size), dtype=type, device=device)
+        
+        os.makedirs(os.path.dirname(train_noise_path), exist_ok=True)
         torch.save(
             train_noise, 
             train_noise_path
@@ -297,6 +302,8 @@ def init_noises(args, latent_size, type, device):
     else:
         val_noise = torch.randn(
             (args.max_samples, 4, latent_size, latent_size), dtype=type, device=device)
+        
+        os.makedirs(os.path.dirname(val_noise_path), exist_ok=True)
         torch.save(
             val_noise, 
             val_noise_path
@@ -309,6 +316,8 @@ def init_noises(args, latent_size, type, device):
     else:
         test_noise = torch.randn(
             (args.test_size, 4, latent_size, latent_size), dtype=type, device=device)
+        
+        os.makedirs(os.path.dirname(test_noise_path), exist_ok=True)
         torch.save(
             test_noise, 
             test_noise_path

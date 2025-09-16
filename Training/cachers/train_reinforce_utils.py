@@ -270,7 +270,10 @@ def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path,
             generated = torch.cat(outputs, dim=0).cpu()
             if is_test:
                 generated = (generated + 1) * 0.5           # [-1,1] -> [0,1]
+            
+            os.makedirs(os.path.dirname(data_path), exist_ok=True)
             torch.save(generated, data_path)
+            
             print(f"\tDATA CREATED AND SAVED TO: {data_path}")
     
     return generated
@@ -320,10 +323,12 @@ def init_noises(args, latent_size, type, device):
     # TRAIN NOISE
     train_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises", f"train_noise_{args.max_samples}.pt")
     if os.path.exists(train_noise_path):
-        train_noise = torch.load(train_noise_path, weights_only=True).to(args.device)
+        train_noise = torch.load(train_noise_path, weights_only=True, map_location='cpu').to(args.device)
     else:
         train_noise = torch.randn(
             (args.max_samples, 4, latent_size, latent_size), dtype=type, device=device)
+        
+        os.makedirs(os.path.dirname(train_noise_path), exist_ok=True)
         torch.save(
             train_noise, 
             train_noise_path
@@ -332,10 +337,12 @@ def init_noises(args, latent_size, type, device):
     # VAL NOISE
     val_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises", f"val_noise_{args.max_samples}.pt")
     if os.path.exists(val_noise_path):
-        val_noise = torch.load(val_noise_path, weights_only=True).to(args.device)
+        val_noise = torch.load(val_noise_path, weights_only=True, map_location='cpu').to(args.device)
     else:
         val_noise = torch.randn(
             (args.max_samples, 4, latent_size, latent_size), dtype=type, device=device)
+        
+        os.makedirs(os.path.dirname(val_noise_path), exist_ok=True)
         torch.save(
             val_noise, 
             val_noise_path
@@ -344,10 +351,12 @@ def init_noises(args, latent_size, type, device):
     # TEST NOISE
     test_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises", f"test_noise_{args.test_size}.pt")
     if os.path.exists(test_noise_path):
-        test_noise = torch.load(test_noise_path, weights_only=True).to(args.device)
+        test_noise = torch.load(test_noise_path, weights_only=True, map_location='cpu').to(args.device)
     else:
         test_noise = torch.randn(
             (args.test_size, 4, latent_size, latent_size), dtype=type, device=device)
+        
+        os.makedirs(os.path.dirname(test_noise_path), exist_ok=True)
         torch.save(
             test_noise, 
             test_noise_path
@@ -444,7 +453,6 @@ def reinforce_training_loop(
             metrics_corrected = (metrics - metrics_mean_reg[None, :]).detach()                       # [num_samples, batch_size]
             
             loss = (metrics_corrected * logprobs[:, None]).mean() * (args.num_samples) / (args.num_samples - 1)
-            
             loss.backward()
             optim.step()
             

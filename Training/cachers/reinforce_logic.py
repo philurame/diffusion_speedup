@@ -62,7 +62,7 @@ def top_k_log_prob(logits, perturbed_logits, k):
     # Вычисляем знаменатель
     # Создаем маску, которая на шаге i будет выключать уже выбранные элементы t_1, ..., t_{i-1}.
     exclusion_mask = torch.cumsum(bin_mask, dim=0)[:-1, :] # (k-1, N)
-    # Добавляем строчку нулей, которая говорить, что на шаге 1 мы ничего не исключаем
+    # Добавляем строчку нулей, которая говорит, что на шаге 1 мы ничего не исключаем
     exclusion_mask = torch.cat([torch.zeros(1, num_total_steps, device=logits.device), exclusion_mask], dim=0) # (k, N)    
     # Применяем маску: добавляем -inf к уже выбранным логитам, чтобы они не участвовали в logsumexp.
     exclusion_mask[exclusion_mask > 0] = float('inf')

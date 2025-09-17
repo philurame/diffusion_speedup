@@ -3,7 +3,7 @@ from lib.models.SDXL.sdxl import BaseSDXL
 from DeepCache import DeepCacheSDHelper
 
 @model_registry.add_to_registry("DEEPCACHE2")
-class DEEPCACHE3(BaseSDXL):
+class DEEPCACHE2(BaseSDXL):
   @classmethod
   def from_pretrained(cls, *args, **kwargs):
     pipe = super().from_pretrained(**kwargs)

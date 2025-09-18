@@ -10,7 +10,7 @@ import gc
 import sys
 from PIL import Image
 from tqdm import tqdm
-from munch import unmunchify
+from munch import Munch, unmunchify
 from collections import deque
 from datetime import datetime
 
@@ -18,39 +18,59 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from Training.cachers.logit_predictor import load_logit_model    
+from Training.cachers.logit_predictor import load_logit_model, BaseLogitModel
 from Training.models import seed_everything
 from Training.cachers.loss_cachers import PatchedLPIPS
 from Training.cachers.reinforce_logic import sample_exp, top_k_log_prob
 from registries import metric_registry
 
-
-def log_train(logit_model, logits, loss, logprobs, before_baseline_and_reg, before_baseline, grad_mean, scheduler, step, args, run):
-
+def log_train(
+    logit_model: BaseLogitModel, 
+    loss: torch.Tensor, 
+    logprobs: torch.Tensor, 
+    before_baseline_and_reg: torch.Tensor, 
+    before_baseline: torch.Tensor, 
+    model_grad_mean: deque,
+    logits_grad_mean: deque, 
+    scheduler: torch.optim.lr_scheduler, 
+    step: int, 
+    args: Munch, 
+    run: neptune.Run 
+):
+    logits = logit_model.logits
+    
     for i in range(len(logits)):
         run[f'logits/logit_{i+1}'].append(logits[i].item(), step=step)
     
-    logits_grad_norm = 0
-    if logits.grad is not None:
-        logits_grad_norm = logits.grad.data.norm(2).item()
-        grad_mean.append(logits_grad_norm)
+    parameters = [
+        p for p in logit_model.parameters() 
+        if p.grad is not None and p.requires_grad and p is not logits
+    ]
     
-    parameters = [p for p in logit_model.parameters() if p.grad is not None and p.requires_grad]
-    
-    total_norm = 0
+    model_norm = 0
     for p in parameters:
         param_norm = p.grad.detach().data.norm(2)
-        total_norm += param_norm.item() ** 2
-    total_norm = total_norm ** 0.5 
+        model_norm += param_norm.item() ** 2
+    model_norm = model_norm ** 0.5
+    
+    logits_grad_norm = 0
+    if logits.grad is not None:
+        logits_grad_norm = logits.grad.data.norm(2).item() ** 2
+        logits_grad_norm = logits_grad_norm ** 0.5
+    
+    model_grad_mean.append(model_norm)
+    logits_grad_mean.append(logits_grad_norm)
+    
     
     run["train"].append({
         'train loss': loss.item(),
         f'train {args.metric} before baseline and regularization': before_baseline_and_reg.item(),
         f'train {args.metric} before baseline': before_baseline.item(),
         'log prob': logprobs.mean().item(),
-        'grad norm': logits_grad_norm,
-        'grad moving average': np.nanmean(grad_mean),
-        'model grad norm': total_norm,
+        'logits grad norm': logits_grad_norm,
+        'logits grad norm moving average': np.nanmean(logits_grad_mean),
+        'model grad norm': model_norm,
+        'model grad norm moving average': np.nanmean(model_grad_mean),
         'lr': scheduler.get_last_lr()[0]
     }, step=step)
 
@@ -401,7 +421,9 @@ def reinforce_training_loop(
         device=args.device
     ) 
     
-    grad_mean = deque([np.nan] * 8, maxlen=8) 
+    logits_grad_mean = deque([np.nan] * 8, maxlen=8)
+    model_grad_mean = deque([np.nan] * 8, maxlen=8) 
+    
     optim = torch.optim.Adam(logit_model.parameters(), args.lr)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, gamma=args.gamma)
     alphas = torch.cat([
@@ -424,7 +446,7 @@ def reinforce_training_loop(
     
     for epoch in tqdm(range(args.epochs), 'Epochs'):
 
-        if epoch % args.eval_freq == 0:
+        if epoch % args.logging.eval_freq == 0:
             log_validation(
                 pipe, helper, logit_model, val_noise, 
                 val_dataloader, teacher_val_images, baseline_val_images,
@@ -453,7 +475,6 @@ def reinforce_training_loop(
 
                 with helper.inference(timesteps=ts):
                     generated = pipe(
-                        # anns, 
                         prompt_embeddings=prompt_embeddings,
                         num_inference_steps=args.student_nfe, 
                         guidance_scale=args.gs,
@@ -475,13 +496,13 @@ def reinforce_training_loop(
             optim.step()
             
             log_train(
-                logit_model, logits, loss, logprobs, metrics_mean.mean(), metrics_mean_reg.mean(), 
-                grad_mean, scheduler, global_step, args, run
+                logit_model, loss, logprobs, metrics_mean.mean(), metrics_mean_reg.mean(), 
+                model_grad_mean, logits_grad_mean, scheduler, global_step, args, run
             )
 
         scheduler.step()
 
-        if (epoch + 1) % args.test_freq == 0:
+        if (epoch + 1) % args.logging.test_freq == 0:
             log_test(
                 pipe, helper, logit_model, test_noise, 
                 test_prompts, epoch+1, args, run

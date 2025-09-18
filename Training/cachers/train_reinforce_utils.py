@@ -17,6 +17,9 @@ from datetime import datetime
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+    
+from lib.models.SDXL.sdxl import BaseSDXL
+from lib.models.models_utils.caching_timestep_helper import CachingTimestepHelper
 
 from Training.cachers.logit_predictor import load_logit_model, BaseLogitModel
 from Training.models import seed_everything
@@ -75,28 +78,42 @@ def log_train(
     }, step=step)
 
 
-def log_validation(pipe, helper, logit_model, val_noise, val_dataloader, teacher_val_images, baseline_imgs, metric, step, args, run, display_k=4):
+def log_validation(
+    pipe: BaseSDXL, 
+    helper: CachingTimestepHelper, 
+    logit_model: BaseLogitModel, 
+    val_noise: torch.Tensor, 
+    val_dataloader: DataLoader, 
+    teacher_val_images: torch.Tensor, 
+    baseline_imgs: torch.Tensor, 
+    metric: torch.Tensor, 
+    step: int, 
+    args: Munch, 
+    run: neptune.Run
+):
     
     def concat_images(orig_imgs, gen_imgs, baseline_imgs):
-        col_orig     = torch.cat(orig_imgs.unbind(0), dim=1).cpu()
-        col_gen      = torch.cat(gen_imgs.unbind(0), dim=1).cpu()
-        col_baseline = torch.cat(baseline_imgs.unbind(0), dim=1).cpu()
+        col_orig     = torch.cat(orig_imgs.unbind(0), dim=1)
+        col_gen      = torch.cat(gen_imgs.unbind(0), dim=1)
+        col_baseline = torch.cat(baseline_imgs.unbind(0), dim=1)
         grid = torch.cat([col_orig, col_gen, col_baseline], dim=2)
         img = grid.mul(0.5).add(0.5).clamp(0, 1)
-        return img.permute(1, 2, 0).cpu().numpy()
+        return img.permute(1, 2, 0).numpy()
     
     metric_value = 0.
     count = 0
+    
+    original, generated = [], []
+    timesteps = []
     
     with torch.no_grad():
         for batch_idx, anns in enumerate(tqdm(val_dataloader, 'Validation', leave=False)):
             batch_start = batch_idx * args.batch_size
             batch_end = batch_start + args.batch_size
             
-            original = teacher_val_images[batch_start:batch_end].to(pipe.device)
+            orig = teacher_val_images[batch_start:batch_end].to(pipe.device)
             current_noise = val_noise[batch_start:batch_end]
             
-            # logits = logit_model(anns)
             prompt_embeddings = pipe.encode_prompt(anns, device=args.device)
             logits = logit_model(prompt_embeddings)
             
@@ -104,64 +121,62 @@ def log_validation(pipe, helper, logit_model, val_noise, val_dataloader, teacher
             ts_to_skip = torch.argsort(mode_logits)[args.num_steps:] + 1
 
             with helper.inference(timesteps=ts_to_skip):
-                generated = pipe(
-                    # anns,
+                gen = pipe(
                     prompt_embeddings=prompt_embeddings, 
                     num_inference_steps=args.student_nfe, 
                     guidance_scale=args.gs,
                     latents=current_noise,
                     output_type='pt'
                 )
-            metric_value += metric.calculate(original, generated).mean().item()
+            metric_value += metric.calculate(orig, gen).mean().item()
             count += 1
+            
+            original.append(orig.cpu())
+            generated.append(gen.cpu())
+            timesteps.append(ts_to_skip)
+            
+    original = torch.cat(original, dim=0)[-args.logging.display_k:]
+    generated = torch.cat(generated, dim=0)[-args.logging.display_k:]
+    baseline = baseline_imgs[-args.logging.display_k:]
+    
+    img = concat_images(original, generated, baseline)
 
-    baseline = baseline_imgs[-len(original):]
-    display_k = min(display_k, len(original))
-
-    img1 = concat_images(
-        original[:display_k],
-        generated[:display_k],
-        baseline[:display_k]
-    )
-    img2 = concat_images(
-        original[-display_k:],
-        generated[-display_k:],
-        baseline[-display_k:]
-    )
-
-    img1_to_log = (img1 * 255).round().astype(np.uint8)
-    img2_to_log = (img2 * 255).round().astype(np.uint8)
+    img = (img * 255).round().astype(np.uint8)
 
     def resize_image(img_array, target_size=(256, 256)):
         img = Image.fromarray(img_array)
         resized_img = img.resize(target_size, resample=Image.LANCZOS)
         return np.array(resized_img)
 
-    resized_img1 = resize_image(img1_to_log, target_size=(512 * 3, display_k * 512))
-    resized_img2 = resize_image(img2_to_log, target_size=(512 * 3, display_k * 512))
+    img = resize_image(img, target_size=(512 * 3, args.logging.display_k * 512))
 
-    run['val/images/variant_1'].append(
-        File.as_image(resized_img1),
-        description=f"original vs generated vs deepcache3 1, step {step}",
+    run['val/images'].append(
+        File.as_image(img),
+        description=f"original vs generated vs deepcache3, step {step}",
         step=step
     )
-
-    run['val/images/variant_2'].append(
-        File.as_image(resized_img2),
-        description=f"original vs generated vs deepcache3 2, step {step}",
-        step=step
-    )
-
-    fig, ax = plt.subplots()
-    steps = [t not in ts_to_skip for t in range(args.student_nfe)]
-    ax.plot(range(args.student_nfe), steps)
-    ones_positions = [i for i, val in enumerate(steps) if val == 1]
-    for pos in ones_positions:
-        ax.axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
-        ax.scatter(pos, 1, color='red', s=50, zorder=10)
-    ax.set_xticks(range(args.student_nfe))
-    ax.set_title(f"Timesteps, step {step}")
+    
+    
+    timesteps = timesteps[-args.logging.display_k:]
+    fig, ax = plt.subplots(args.logging.display_k, 1, figsize=(6, 3 * args.logging.display_k))
+    
+    for i in range(args.logging.display_k):
+        steps = [t not in timesteps[i] for t in range(args.student_nfe)]
+        ones_positions = [i for i, val in enumerate(steps) if val == 1]
+        
+        ax[i].plot(range(args.student_nfe), steps)
+        
+        for pos in ones_positions:
+            ax[i].axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
+            ax[i].scatter(pos, 1, color='red', s=50, zorder=10)
+        
+        ax[i].set_xticks(range(args.student_nfe))
+    
+    ax[0].set_title(f"Timesteps, step {step}")
+    plt.tight_layout()
+    
     run['val/timesteps_plot'].append(fig, step=step)
+    
     plt.close(fig)
 
     run[f'val/{args.metric}'].append(float(metric_value / count), step=step)

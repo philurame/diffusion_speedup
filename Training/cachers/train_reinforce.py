@@ -33,6 +33,9 @@ def main(config, workspace_name, device):
     now = datetime.datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
     
+    args.checkpoint_path = os.path.join('checkpoints/cachers', timestamp)
+    os.makedirs(args.checkpoint_path, exist_ok=True)
+    
     if args.name is None:
         key_params = [
             f"steps={args.num_steps}",

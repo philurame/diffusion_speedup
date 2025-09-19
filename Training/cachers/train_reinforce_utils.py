@@ -13,6 +13,7 @@ from tqdm import tqdm
 from munch import Munch, unmunchify
 from collections import deque
 from datetime import datetime
+from typing import List
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
@@ -156,23 +157,32 @@ def log_validation(
         step=step
     )
     
-    
-    timesteps = timesteps[-args.logging.display_k:]
-    fig, ax = plt.subplots(args.logging.display_k, 1, figsize=(6, 3 * args.logging.display_k))
-    
-    for i in range(args.logging.display_k):
-        steps = [t not in timesteps[i] for t in range(args.student_nfe)]
+        
+    def draw_plot(ax, timesteps):
+        steps = [t not in timesteps for t in range(args.student_nfe)]
         ones_positions = [i for i, val in enumerate(steps) if val == 1]
         
-        ax[i].plot(range(args.student_nfe), steps)
+        ax.plot(range(args.student_nfe), steps)
         
         for pos in ones_positions:
-            ax[i].axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
-            ax[i].scatter(pos, 1, color='red', s=50, zorder=10)
+            ax.axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
+            ax.scatter(pos, 1, color='red', s=50, zorder=10)
         
-        ax[i].set_xticks(range(args.student_nfe))
+        ax.set_xticks(range(args.student_nfe))
+        
+        
+    if logit_model.config.model_variant == 'constant':
+        timesteps = timesteps[-1]
+        fig, ax = plt.subplots(figsize=(6, 3))
+        draw_plot(ax, timesteps)
+    else:
+        timesteps = timesteps[-args.logging.display_k:]
+        fig, ax = plt.subplots(args.logging.display_k, 1, figsize=(6, 3 * args.logging.display_k))
     
-    ax[0].set_title(f"Timesteps, step {step}")
+        for k in range(args.logging.display_k):
+            draw_plot(ax[k], timesteps[k])
+    
+    fig.suptitle(f"Timesteps, step {step}")
     plt.tight_layout()
     
     run['val/timesteps_plot'].append(fig, step=step)
@@ -182,7 +192,17 @@ def log_validation(
     run[f'val/{args.metric}'].append(float(metric_value / count), step=step)
 
 
-def log_test(pipe, helper, logit_model, test_noise, test_prompts, epoch, args, run):
+def log_test(
+    pipe: BaseSDXL, 
+    helper: CachingTimestepHelper, 
+    logit_model: BaseLogitModel, 
+    test_noise: torch.Tensor, 
+    test_prompts: List[str], 
+    epoch: int, 
+    global_step: int, 
+    args: Munch, 
+    run: neptune.Run
+):
 
     metric_names = ['LPIPS', 'PLPIPS', 'L1', 'AQ', 'IQ', 'HPS', 'CLIP', 'ImageReward']
     test_dataloader = DataLoader(test_prompts, batch_size=args.batch_size, shuffle=False)
@@ -197,20 +217,9 @@ def log_test(pipe, helper, logit_model, test_noise, test_prompts, epoch, args, r
         args.teacher_nfe, "teacher test data", is_test=True
     )
 
-    # CACHED MODEL
-    # mode_logits = sample_exp(logits, inference=True)
-    # ts_to_skip = (torch.argsort(mode_logits)[args.num_steps:] + 1).tolist() 
-    # not_cached_steps = sorted(set(list(range(args.student_nfe))) - set(ts_to_skip))
-    # student_data_path = os.path.join(
-    #     ROOT, 'DATA', 'cachers', 'eval_data', 
-    #     f"student_test_{args.model_name}_{args.solver}_{args.scheduler}_{args.student_nfe}_{args.test_size}_{str(not_cached_steps)}.pt"
-    # )
+
+    student_data_path = os.path.join(args.checkpoint_path, str(epoch), "images.pt")
     
-    # немного тут сасальт происходит, потом подумаю о жизни
-    student_data_path = os.path.join(
-        ROOT, 'DATA', 'cachers', 'eval_data', 
-        f"student_test_{args.model_name}_{args.solver}_{args.scheduler}_{args.student_nfe}_{args.test_size}.pt"
-    )
     imgs_student = generate_data(
         pipe, helper, logit_model, test_dataloader, test_noise, student_data_path, args, 
         args.student_nfe, "student test data", is_test=True
@@ -236,29 +245,9 @@ def log_test(pipe, helper, logit_model, test_noise, test_prompts, epoch, args, r
         prompts=test_prompts,
         device=args.device,
     )
-
-    # test_run_name = f"TEST_{args.model_name}_{args.solver}_{args.scheduler}__{str(not_cached_steps)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    test_run_name = f"TEST_{args.model_name}_{args.solver}_{args.scheduler}__{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    metric_run = neptune.init_run(
-        project="{args.workspace_name}/reinforce-metrics",
-        name=test_run_name,
-        capture_stdout=False,
-        capture_stderr=False,
-        capture_hardware_metrics=False,
-        mode="offline"
-    )
-
-    params = unmunchify(args)
-    params.update({
-        "trained_epochs": epoch,
-        # "cached_timesteps": str(ts_to_skip),
-        # "not_cached_timesteps": str(not_cached_steps),
-    })
-    metric_run["parameters"] = params
-    metric_run["metrics"] = metrics
-
-    metric_run.stop()
-
+    run["metrics"].append(metrics, step=global_step)
+    
+    
 def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path, args, nfe, dataset_description="", is_test=False):
     # нам дают либо таймстепы сразу, либо модельку, их выдающую
     predict = not isinstance(ts_to_skip, list) 
@@ -520,7 +509,7 @@ def reinforce_training_loop(
         if (epoch + 1) % args.logging.test_freq == 0:
             log_test(
                 pipe, helper, logit_model, test_noise, 
-                test_prompts, epoch+1, args, run
+                test_prompts, epoch+1, global_step, args, run
             )
 
     log_validation(

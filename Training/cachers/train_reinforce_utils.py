@@ -10,161 +10,199 @@ import gc
 import sys
 from PIL import Image
 from tqdm import tqdm
-from munch import unmunchify
+from munch import Munch, unmunchify
 from collections import deque
 from datetime import datetime
+from typing import List
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
     
+from lib.models.SDXL.sdxl import BaseSDXL
+from lib.models.models_utils.caching_timestep_helper import CachingTimestepHelper
+
+from Training.cachers.logit_predictor import load_logit_model, BaseLogitModel
 from Training.models import seed_everything
 from Training.cachers.loss_cachers import PatchedLPIPS
 from Training.cachers.reinforce_logic import sample_exp, top_k_log_prob
 from registries import metric_registry
 
-
-def init_logits(args):
+def log_train(
+    logit_model: BaseLogitModel, 
+    loss: torch.Tensor, 
+    logprobs: torch.Tensor, 
+    before_baseline_and_reg: torch.Tensor, 
+    before_baseline: torch.Tensor, 
+    model_grad_mean: deque,
+    logits_grad_mean: deque, 
+    scheduler: torch.optim.lr_scheduler, 
+    step: int, 
+    args: Munch, 
+    run: neptune.Run 
+):
+    logits = logit_model.logits
     
-    temp_student_nfe = args.student_nfe - 1 # we never cache first step
-    if args.init_logits == 'ones':
-        logits = torch.ones(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device, requires_grad=True
-        ) 
-    elif  args.init_logits == 'randn':
-        logits = torch.randn(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device, requires_grad=True
-        )
-    elif args.init_logits == 'zeros':
-        logits = torch.zeros(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device, requires_grad=True
-        ) 
-    elif args.init_logits == 'deepcache-3':
-        logits = torch.ones(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device
-        )
-        logits[2::3] *= 0.9 # пересчитываемые логиты должны быть поменьше
-        logits.requires_grad_(True)
-    elif args.init_logits == 'deepcache-4':
-        logits = torch.ones(               
-            temp_student_nfe, dtype=torch.float32, 
-            device=args.device
-        )
-        logits[3::4] *= 0.9 # пересчитываемые логиты должны быть поменьше ???
-        logits.requires_grad_(True)
-    else:
-        raise ValueError(f"Unknown init_logits type: {args.init_logits}")
-    return logits
-
-def log_train(logits, loss, logprobs, before_baseline_and_reg, before_baseline, grad_mean, scheduler, step, args, run):
-
     for i in range(len(logits)):
         run[f'logits/logit_{i+1}'].append(logits[i].item(), step=step)
-        
-    grad_norm = logits.grad.data.norm(2).item()
-    grad_mean.append(grad_norm)
+    
+    parameters = [
+        p for p in logit_model.parameters() 
+        if p.grad is not None and p.requires_grad and p is not logits
+    ]
+    
+    model_norm = 0
+    for p in parameters:
+        param_norm = p.grad.detach().data.norm(2)
+        model_norm += param_norm.item() ** 2
+    model_norm = model_norm ** 0.5
+    
+    logits_grad_norm = 0
+    if logits.grad is not None:
+        logits_grad_norm = logits.grad.data.norm(2).item() ** 2
+        logits_grad_norm = logits_grad_norm ** 0.5
+    
+    model_grad_mean.append(model_norm)
+    logits_grad_mean.append(logits_grad_norm)
+    
     
     run["train"].append({
         'train loss': loss.item(),
         f'train {args.metric} before baseline and regularization': before_baseline_and_reg.item(),
         f'train {args.metric} before baseline': before_baseline.item(),
         'log prob': logprobs.mean().item(),
-        'grad norm': grad_norm,
-        'grad moving average': np.nanmean(grad_mean),
+        'logits grad norm': logits_grad_norm,
+        'logits grad norm moving average': np.nanmean(logits_grad_mean),
+        'model grad norm': model_norm,
+        'model grad norm moving average': np.nanmean(model_grad_mean),
         'lr': scheduler.get_last_lr()[0]
     }, step=step)
 
 
-def log_validation(pipe, helper, logits, val_noise, val_dataloader, teacher_val_images, baseline_imgs, metric, step, args, run, display_k=4):
+def log_validation(
+    pipe: BaseSDXL, 
+    helper: CachingTimestepHelper, 
+    logit_model: BaseLogitModel, 
+    val_noise: torch.Tensor, 
+    val_dataloader: DataLoader, 
+    teacher_val_images: torch.Tensor, 
+    baseline_imgs: torch.Tensor, 
+    metric: torch.Tensor, 
+    step: int, 
+    args: Munch, 
+    run: neptune.Run
+):
     
     def concat_images(orig_imgs, gen_imgs, baseline_imgs):
-        col_orig     = torch.cat(orig_imgs.unbind(0), dim=1).cpu()
-        col_gen      = torch.cat(gen_imgs.unbind(0), dim=1).cpu()
-        col_baseline = torch.cat(baseline_imgs.unbind(0), dim=1).cpu()
+        col_orig     = torch.cat(orig_imgs.unbind(0), dim=1)
+        col_gen      = torch.cat(gen_imgs.unbind(0), dim=1)
+        col_baseline = torch.cat(baseline_imgs.unbind(0), dim=1)
         grid = torch.cat([col_orig, col_gen, col_baseline], dim=2)
         img = grid.mul(0.5).add(0.5).clamp(0, 1)
-        return img.permute(1, 2, 0).cpu().numpy()
-    
-    mode_logits = sample_exp(logits, inference=True)
-    ts_to_skip = torch.argsort(mode_logits)[args.num_steps:] + 1
+        return img.permute(1, 2, 0).numpy()
     
     metric_value = 0.
     count = 0
+    
+    original, generated = [], []
+    timesteps = []
     
     with torch.no_grad():
         for batch_idx, anns in enumerate(tqdm(val_dataloader, 'Validation', leave=False)):
             batch_start = batch_idx * args.batch_size
             batch_end = batch_start + args.batch_size
-            original = teacher_val_images[batch_start:batch_end].to(pipe.device)
+            
+            orig = teacher_val_images[batch_start:batch_end].to(pipe.device)
             current_noise = val_noise[batch_start:batch_end]
+            
+            prompt_embeddings = pipe.encode_prompt(anns, device=args.device)
+            logits = logit_model(prompt_embeddings)
+            
+            mode_logits = sample_exp(logits, inference=True)
+            ts_to_skip = torch.argsort(mode_logits)[args.num_steps:] + 1
 
             with helper.inference(timesteps=ts_to_skip):
-                generated = pipe(
-                    anns, 
+                gen = pipe(
+                    prompt_embeddings=prompt_embeddings, 
                     num_inference_steps=args.student_nfe, 
                     guidance_scale=args.gs,
                     latents=current_noise,
                     output_type='pt'
                 )
-            metric_value += metric.calculate(original, generated).mean().item()
+            metric_value += metric.calculate(orig, gen).mean().item()
             count += 1
+            
+            original.append(orig.cpu())
+            generated.append(gen.cpu())
+            timesteps.append(ts_to_skip)
+            
+    original = torch.cat(original, dim=0)[-args.logging.display_k:]
+    generated = torch.cat(generated, dim=0)[-args.logging.display_k:]
+    baseline = baseline_imgs[-args.logging.display_k:]
+    
+    img = concat_images(original, generated, baseline)
 
-    baseline = baseline_imgs[-len(original):]
-
-    img1 = concat_images(
-        original[:display_k],
-        generated[:display_k],
-        baseline[:display_k]
-    )
-    img2 = concat_images(
-        original[-display_k:],
-        generated[-display_k:],
-        baseline[-display_k:]
-    )
-
-    img1_to_log = (img1 * 255).round().astype(np.uint8)
-    img2_to_log = (img2 * 255).round().astype(np.uint8)
+    img = (img * 255).round().astype(np.uint8)
 
     def resize_image(img_array, target_size=(256, 256)):
         img = Image.fromarray(img_array)
         resized_img = img.resize(target_size, resample=Image.LANCZOS)
         return np.array(resized_img)
 
-    resized_img1 = resize_image(img1_to_log, target_size=(1536, 2048))
-    resized_img2 = resize_image(img2_to_log, target_size=(1536, 2048))
+    img = resize_image(img, target_size=(512 * 3, args.logging.display_k * 512))
 
-    run['val/images/variant_1'].append(
-        File.as_image(resized_img1),
-        description=f"original vs generated vs deepcache3 1, step {step}",
+    run['val/images'].append(
+        File.as_image(img),
+        description=f"original vs generated vs deepcache3, step {step}",
         step=step
     )
-
-    run['val/images/variant_2'].append(
-        File.as_image(resized_img2),
-        description=f"original vs generated vs deepcache3 2, step {step}",
-        step=step
-    )
-
-    fig, ax = plt.subplots()
-    steps = [t not in ts_to_skip for t in range(args.student_nfe)]
-    ax.plot(range(args.student_nfe), steps)
-    ones_positions = [i for i, val in enumerate(steps) if val == 1]
-    for pos in ones_positions:
-        ax.axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
-        ax.scatter(pos, 1, color='red', s=50, zorder=10)
-    ax.set_xticks(range(args.student_nfe))
-    ax.set_title(f"Timesteps, step {step}")
+    
+        
+    def draw_plot(ax, timesteps):
+        steps = [t not in timesteps for t in range(args.student_nfe)]
+        ones_positions = [i for i, val in enumerate(steps) if val == 1]
+        
+        ax.plot(range(args.student_nfe), steps)
+        
+        for pos in ones_positions:
+            ax.axvline(x=pos, ymax=1, linestyle='--', color='green', alpha=0.7)
+            ax.scatter(pos, 1, color='red', s=50, zorder=10)
+        
+        ax.set_xticks(range(args.student_nfe))
+        
+        
+    if logit_model.config.model_variant == 'constant':
+        timesteps = timesteps[-1]
+        fig, ax = plt.subplots(figsize=(6, 3))
+        draw_plot(ax, timesteps)
+    else:
+        timesteps = timesteps[-args.logging.display_k:]
+        fig, ax = plt.subplots(args.logging.display_k, 1, figsize=(6, 3 * args.logging.display_k))
+    
+        for k in range(args.logging.display_k):
+            draw_plot(ax[k], timesteps[k])
+    
+    fig.suptitle(f"Timesteps, step {step}")
+    plt.tight_layout()
+    
     run['val/timesteps_plot'].append(fig, step=step)
+    
     plt.close(fig)
 
     run[f'val/{args.metric}'].append(float(metric_value / count), step=step)
 
 
-def log_test(pipe, helper, logits, test_noise, test_prompts, epoch, args, run):
+def log_test(
+    pipe: BaseSDXL, 
+    helper: CachingTimestepHelper, 
+    logit_model: BaseLogitModel, 
+    test_noise: torch.Tensor, 
+    test_prompts: List[str], 
+    epoch: int, 
+    global_step: int, 
+    args: Munch, 
+    run: neptune.Run
+):
 
     metric_names = ['LPIPS', 'PLPIPS', 'L1', 'AQ', 'IQ', 'HPS', 'CLIP', 'ImageReward']
     test_dataloader = DataLoader(test_prompts, batch_size=args.batch_size, shuffle=False)
@@ -179,16 +217,11 @@ def log_test(pipe, helper, logits, test_noise, test_prompts, epoch, args, run):
         args.teacher_nfe, "teacher test data", is_test=True
     )
 
-    # CACHED MODEL
-    mode_logits = sample_exp(logits, inference=True)
-    ts_to_skip = (torch.argsort(mode_logits)[args.num_steps:] + 1).tolist() 
-    not_cached_steps = sorted(set(list(range(args.student_nfe))) - set(ts_to_skip))
-    student_data_path = os.path.join(
-        ROOT, 'DATA', 'cachers', 'eval_data', 
-        f"student_test_{args.model_name}_{args.solver}_{args.scheduler}_{args.student_nfe}_{args.test_size}_{str(not_cached_steps)}.pt"
-    )
+
+    student_data_path = os.path.join(args.checkpoint_path, str(epoch), "images.pt")
+    
     imgs_student = generate_data(
-        pipe, helper, ts_to_skip, test_dataloader, test_noise, student_data_path, args, 
+        pipe, helper, logit_model, test_dataloader, test_noise, student_data_path, args, 
         args.student_nfe, "student test data", is_test=True
     )
 
@@ -212,29 +245,14 @@ def log_test(pipe, helper, logits, test_noise, test_prompts, epoch, args, run):
         prompts=test_prompts,
         device=args.device,
     )
-
-    test_run_name = f"TEST_{args.model_name}_{args.solver}_{args.scheduler}__{str(not_cached_steps)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    metric_run = neptune.init_run(
-        project="{args.workspace_name}/reinforce-metrics",
-        name=test_run_name,
-        capture_stdout=False,
-        capture_stderr=False,
-        capture_hardware_metrics=False,
-        mode="offline"
-    )
-
-    params = unmunchify(args)
-    params.update({
-        "trained_epochs": epoch,
-        "cached_timesteps": str(ts_to_skip),
-        "not_cached_timesteps": str(not_cached_steps),
-    })
-    metric_run["parameters"] = params
-    metric_run["metrics"] = metrics
-
-    metric_run.stop()
-
+    run["metrics"].append(metrics, step=global_step)
+    
+    
 def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path, args, nfe, dataset_description="", is_test=False):
+    # нам дают либо таймстепы сразу, либо модельку, их выдающую
+    predict = not isinstance(ts_to_skip, list) 
+    if predict:
+        model = ts_to_skip
     
     if os.path.exists(data_path):
         generated = torch.load(data_path, weights_only=True)
@@ -243,10 +261,10 @@ def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path,
     else:
         seed_everything()
 
-        not_cached = sorted(set(range(nfe)) - set(ts_to_skip))
-
-        print(f"\n\tNOT CACHED: {not_cached}")
-        print(f"\tCACHED: {ts_to_skip}")
+        if not predict:
+            not_cached = sorted(set(range(nfe)) - set(ts_to_skip))
+            print(f"\n\tNOT CACHED: {not_cached}")
+            print(f"\tCACHED: {ts_to_skip}")
 
         if not os.path.exists(data_path):
 
@@ -256,10 +274,22 @@ def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path,
                     batch_start = batch_idx * args.batch_size
                     batch_end = batch_start + args.batch_size
                     current_noise = noise_tensor[batch_start:batch_end]
+                    
+                    prompt_embeddings = pipe.encode_prompt(anns, device=args.device)
+                    if predict:
+                        logits = model(prompt_embeddings)
+                        
+                        mode_logits = sample_exp(logits, inference=True)
+                        ts_to_skip = torch.argsort(mode_logits)[args.num_steps:] + 1
+                        
+                        not_cached = sorted(set(range(nfe)) - set(ts_to_skip))
+                        print(f"\n\tNOT CACHED: {not_cached}")
+                        print(f"\tCACHED: {ts_to_skip}")
 
                     with helper.inference(timesteps=ts_to_skip):
                         gen = pipe(
-                            anns,
+                            # anns,
+                            prompt_embeddings=prompt_embeddings,
                             num_inference_steps=nfe,
                             guidance_scale=args.gs,
                             latents=current_noise,
@@ -306,6 +336,8 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
         ROOT, "DATA", "cachers", "train_data", 
         f"DEEPCACHE3_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt"
     )
+    
+    # TODO: проверить, что наша реализация с теми же шагами даёт такие же метрики, как реализация DeepCache
     not_cached_steps = [0, 3, 6, 9, 12, 15, 18, 21, 24]
     ts_to_skip = sorted(set(list(range(args.student_nfe))) - set(not_cached_steps))
     baseline_val_data = generate_data(
@@ -385,9 +417,18 @@ def reinforce_training_loop(
         metric = PatchedLPIPS(device=pipe.device)
 
     args.num_steps = args.num_steps - 1
-    logits = init_logits(args) 
-    grad_mean = deque([np.nan] * 8, maxlen=8) 
-    optim = torch.optim.Adam([logits], args.lr)
+    
+    logit_model = load_logit_model(
+        args.student_nfe - 1, 
+        args.logit_predictor,
+        dtype=torch.float32, 
+        device=args.device
+    ) 
+    
+    logits_grad_mean = deque([np.nan] * 8, maxlen=8)
+    model_grad_mean = deque([np.nan] * 8, maxlen=8) 
+    
+    optim = torch.optim.Adam(logit_model.parameters(), args.lr)
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, gamma=args.gamma)
     alphas = torch.cat([
         torch.linspace(args.alpha, 0, args.warming_entropy_epochs),
@@ -409,14 +450,16 @@ def reinforce_training_loop(
     
     for epoch in tqdm(range(args.epochs), 'Epochs'):
 
-        if epoch % args.eval_freq == 0:
+        if epoch % args.logging.eval_freq == 0:
             log_validation(
-                pipe, helper, logits, val_noise, 
+                pipe, helper, logit_model, val_noise, 
                 val_dataloader, teacher_val_images, baseline_val_images,
                 metric, epoch * len(train_dataloader), args, run
             )
         
         for batch_idx, anns in enumerate(tqdm(train_dataloader, 'Training', leave=False)):
+            prompt_embeddings = pipe.encode_prompt(anns, device=args.device)
+            logits = logit_model(prompt_embeddings)
             
             global_step = epoch * len(train_dataloader) + batch_idx    
             optim.zero_grad()
@@ -436,7 +479,7 @@ def reinforce_training_loop(
 
                 with helper.inference(timesteps=ts):
                     generated = pipe(
-                        anns, 
+                        prompt_embeddings=prompt_embeddings,
                         num_inference_steps=args.student_nfe, 
                         guidance_scale=args.gs,
                         latents=current_noise,
@@ -457,20 +500,20 @@ def reinforce_training_loop(
             optim.step()
             
             log_train(
-                logits, loss, logprobs, metrics_mean.mean(), metrics_mean_reg.mean(), 
-                grad_mean, scheduler, global_step, args, run
+                logit_model, loss, logprobs, metrics_mean.mean(), metrics_mean_reg.mean(), 
+                model_grad_mean, logits_grad_mean, scheduler, global_step, args, run
             )
 
         scheduler.step()
 
-        if (epoch + 1) % args.test_freq == 0:
+        if (epoch + 1) % args.logging.test_freq == 0:
             log_test(
-                pipe, helper, logits, test_noise, 
-                test_prompts, epoch+1, args, run
+                pipe, helper, logit_model, test_noise, 
+                test_prompts, epoch+1, global_step, args, run
             )
 
     log_validation(
-        pipe, helper, logits, val_noise, 
+        pipe, helper, logit_model, val_noise, 
         val_dataloader, teacher_val_images, baseline_val_images,
         metric, (epoch+1) * len(train_dataloader), args, run
     )

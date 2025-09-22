@@ -8,7 +8,7 @@ class BaseSDXL(StableDiffusionXLPipeline):
     device = kwargs.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
     pipe = super().from_pretrained(
       "stabilityai/stable-diffusion-xl-base-1.0", 
-      cache_dir = "/home/jovyan/maliev/DIFFUSION_SPEEDUP/DATA/SDXL_FILES",
+      # cache_dir = "/home/jovyan/maliev/DIFFUSION_SPEEDUP/DATA/SDXL_FILES",
       torch_dtype=torch.float16 if half else torch.float32,
       variant="fp16" if half else None,
       local_files_only=False # use True for HSE cluster
@@ -40,12 +40,14 @@ class BaseSDXL(StableDiffusionXLPipeline):
       return self._call_impl(*args, **kwargs)
   
   def _call_impl(self,
-    prompt: str,
+    prompt: str = None,
     num_inference_steps: int = 50,
     timesteps = None,
     output_type="latent",
+    prompt_embeddings=None,
     **kwargs
     ):
+    assert (prompt is not None) != (prompt_embeddings is not None)
     '''
     returns latents only
     scheduler must be combined with solver first!
@@ -54,19 +56,29 @@ class BaseSDXL(StableDiffusionXLPipeline):
     guidance_scale = kwargs.get('guidance_scale', 5)
     do_classifier_free_guidance = guidance_scale>0
 
-    # Prepare text embeddings
-    ( 
-      prompt_embeds,
-      negative_prompt_embeds,
-      pooled_prompt_embeds,
-      negative_pooled_prompt_embeds,
-    ) = self.encode_prompt(prompt, device=device)
+    if prompt_embeddings is None:
+      # Prepare text embeddings
+      ( 
+        prompt_embeds,
+        negative_prompt_embeds,
+        pooled_prompt_embeds,
+        negative_pooled_prompt_embeds,
+      ) = self.encode_prompt(prompt, device=device)
+    
+    else:
+      ( 
+        prompt_embeds,
+        negative_prompt_embeds,
+        pooled_prompt_embeds,
+        negative_pooled_prompt_embeds,
+      ) = prompt_embeddings
 
     # generated height, width (should better use 1024 or >=512)
     height = kwargs.get('height', self.default_sample_size * self.vae_scale_factor)
     width  = kwargs.get('width',  self.default_sample_size * self.vae_scale_factor)
 
-    batch_size = 1 if isinstance(prompt, str) else len(prompt)
+    # batch_size = 1 if isinstance(prompt, str) else len(prompt)
+    batch_size = prompt_embeds.shape[0]
 
     # Create initial noise
     latents = self.prepare_latents(

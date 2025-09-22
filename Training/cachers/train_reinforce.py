@@ -2,7 +2,7 @@ import click
 import yaml
 import neptune
 import datetime
-from munch import Munch
+from munch import munchify
 import os, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -25,7 +25,7 @@ def main(config, workspace_name, device):
     # УБРАТЬ ЗАВИСИМОСТЬ ОТ config
     with open(config, 'r') as f:
         args = yaml.safe_load(f)
-    args = Munch(args)
+    args = munchify(args)
     
     args.device = device
     args.workspace_name = workspace_name
@@ -33,16 +33,22 @@ def main(config, workspace_name, device):
     now = datetime.datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
     
+    args.checkpoint_path = os.path.join('checkpoints/cachers', timestamp)
+    os.makedirs(args.checkpoint_path, exist_ok=True)
+    
     if args.name is None:
         key_params = [
             f"steps={args.num_steps}",
             f"ns={args.num_samples}", 
             f"ms={args.max_samples}",
-            f"init={args.init_logits}",
             f"metric={args.metric}",
             f"lr={args.lr}",
             f"gs={args.gs}",
-            f"alpha={args.alpha}"
+            f"alpha={args.alpha}",
+            f"model_variant={args.logit_predictor.model_variant}",
+            f"train_logits={args.logit_predictor.train_logits}",
+            f"init_logits={args.logit_predictor.init_logits}",
+            # f"prompt_extraction_variant={args.logit_predictor.prompt_extraction_variant}"
         ]
         args.name = "_".join(key_params)
     run_name = f"{args.name}_{timestamp}"

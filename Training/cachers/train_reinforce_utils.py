@@ -314,7 +314,7 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     # TEACHER TRAIN DATA
     teacher_train_data_path = os.path.join(
         ROOT, "DATA", "cachers", "train_data", 
-        f"teacher_train_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt"
+        f"teacher_train_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pt"
     )
     teacher_train_data = generate_data(
         pipe, helper, [], train_dataloader, train_noise, teacher_train_data_path, args,
@@ -324,7 +324,7 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     # TEACHER VAL DATA
     teacher_val_data_path = os.path.join(
         ROOT, "DATA", "cachers", "train_data", 
-        f"teacher_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt"
+        f"teacher_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pt"
     )
     teacher_val_data = generate_data(
         pipe, helper, [], val_dataloader, val_noise, teacher_val_data_path, args,
@@ -334,11 +334,13 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     # DEEPCACHE3 VAL DATA
     baseline_val_data_path = os.path.join(
         ROOT, "DATA", "cachers", "train_data", 
-        f"DEEPCACHE3_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.max_samples}.pt"
+        f"{args.logit_predictor.init_logits}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pt"
     )
-    
-    # TODO: проверить, что наша реализация с теми же шагами даёт такие же метрики, как реализация DeepCache
-    not_cached_steps = [0, 3, 6, 9, 12, 15, 18, 21, 24]
+    if args.logit_predictor.init_logits == "deepcache-3":
+        stride = 3
+    elif args.logit_predictor.init_logits == "deepcache-4":
+        stride = 4
+    not_cached_steps = list(range(0, int(args.teacher_nfe), stride))
     ts_to_skip = sorted(set(list(range(args.student_nfe))) - set(not_cached_steps))
     baseline_val_data = generate_data(
         pipe, helper, ts_to_skip, val_dataloader, val_noise, baseline_val_data_path, args,

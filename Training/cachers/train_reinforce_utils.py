@@ -259,7 +259,7 @@ def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path,
         assert len(noise_tensor) == len(generated)
         print(f"\nFOUND READY {dataset_description}: {data_path}.\n")
     else:
-        seed_everything()
+        seed_everything(args.seed)
 
         if not predict:
             not_cached = sorted(set(range(nfe)) - set(ts_to_skip))
@@ -352,7 +352,7 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
 
 def init_noises(args, latent_size, type, device):
 
-    seed_everything()
+    seed_everything(args.seed)
 
     # TRAIN NOISE
     train_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises", f"train_noise_{args.max_samples}.pt")
@@ -409,7 +409,7 @@ def reinforce_training_loop(
     run
 ):
     
-    seed_everything()
+    seed_everything(args.seed)
     
     helper = pipe.cacher
     latent_size = pipe.unet.config.sample_size
@@ -508,7 +508,7 @@ def reinforce_training_loop(
 
         scheduler.step()
 
-        if (epoch + 1) % args.logging.test_freq == 0:
+        if (epoch + 1) % args.logging.test_freq == 0 or (epoch + 1) == args.epochs:
             log_test(
                 pipe, helper, logit_model, test_noise, 
                 test_prompts, epoch+1, global_step, args, run

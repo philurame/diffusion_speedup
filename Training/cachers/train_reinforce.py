@@ -21,13 +21,15 @@ from Training.cachers.train_reinforce_utils import reinforce_training_loop
 @click.option("--config", type=str, required=True, help="Path to YAML config file")
 @click.option("--project_name", type=str, required=True, help="neptune project name in format {workspace}/{project}")
 @click.option("--device", type=str, default="cuda")
-def main(config, workspace_name, device):
+@click.option("--seed", type=int, default=42)
+def main(config, project_name, device, seed):
     with open(config, 'r') as f:
         args = yaml.safe_load(f)
     args = munchify(args)
     
     args.device = device
-    args.workspace_name = workspace_name
+    args.seed = seed
+    args.project_name = project_name
     
     now = datetime.datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")

@@ -19,10 +19,9 @@ from Training.cachers.train_reinforce_utils import reinforce_training_loop
 
 @click.command()
 @click.option("--config", type=str, required=True, help="Path to YAML config file")
-@click.option("--workspace_name", type=str, required=True, help="neptune workspace name")
+@click.option("--project_name", type=str, required=True, help="neptune project name in format {workspace}/{project}")
 @click.option("--device", type=str, default="cuda")
 def main(config, workspace_name, device):
-    # УБРАТЬ ЗАВИСИМОСТЬ ОТ config
     with open(config, 'r') as f:
         args = yaml.safe_load(f)
     args = munchify(args)
@@ -54,7 +53,7 @@ def main(config, workspace_name, device):
     run_name = f"{args.name}_{timestamp}"
     print(f"Generated run name: {run_name}")
 
-    run = neptune.init_run(project=f"{workspace_name}/reinforce-cacher", name=run_name)
+    run = neptune.init_run(project=project_name, name=run_name)
     run["parameters"] = dict(args)
     run["artifacts/config.yaml"].upload(config)
 

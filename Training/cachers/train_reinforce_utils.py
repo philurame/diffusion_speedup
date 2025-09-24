@@ -246,6 +246,10 @@ def log_test(
         device=args.device,
     )
     run["metrics"].append(metrics, step=global_step)
+
+    del imgs_teacher, imgs_student
+    gc.collect()
+    torch.cuda.empty_cache()    
     
     
 def generate_data(pipe, helper, ts_to_skip, dataloader, noise_tensor, data_path, args, nfe, dataset_description="", is_test=False):
@@ -339,6 +343,9 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     if args.logit_predictor.init_logits == "deepcache-3":
         stride = 3
     elif args.logit_predictor.init_logits == "deepcache-4":
+        stride = 4
+    # КОСТЫЛЬ
+    elif args.logit_predictor.init_logits == "randn":
         stride = 4
     not_cached_steps = list(range(0, int(args.teacher_nfe), stride))
     ts_to_skip = sorted(set(list(range(args.student_nfe))) - set(not_cached_steps))

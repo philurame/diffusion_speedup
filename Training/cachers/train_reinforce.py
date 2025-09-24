@@ -14,7 +14,7 @@ import_dir(os.path.join(ROOT, 'lib'))
 
 from lib.datasets.r_coco import COCO_SHORT
 from torch.utils.data import DataLoader
-
+from Training.models import seed_everything
 from Training.cachers.train_reinforce_utils import reinforce_training_loop
 
 @click.command()
@@ -59,6 +59,7 @@ def main(config, project_name, device, seed):
     run["parameters"] = dict(args)
     run["artifacts/config.yaml"].upload(config)
 
+    seed_everything(args.seed)
     pipe = model_registry[args.model_name].from_pretrained(device=device)
     SolverClass = solver_registry[args.solver]
     SchedulerClass = scheduler_registry[args.scheduler]    
@@ -66,7 +67,7 @@ def main(config, project_name, device, seed):
     pipe.scheduler = SolverSchedulerConstructor(config=pipe.scheduler_config)
 
     coco = COCO_SHORT()
-    train_dataloader = DataLoader(coco.prompts[:args.max_samples], batch_size=args.batch_size, shuffle=False)
+    train_dataloader = DataLoader(coco.prompts[:args.max_samples], batch_size=args.batch_size, shuffle=True)
     val_dataloader = DataLoader(coco.prompts[-args.max_samples:], batch_size=args.batch_size, shuffle=False)
     test_prompts = coco.prompts[-args.test_size:]
 

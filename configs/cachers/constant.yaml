@@ -5,7 +5,7 @@ metric: "patched-lpips"
 solver: "DDIM"
 scheduler: "LINEAR"
 
-epochs: 400
+epochs: 300
 batch_size: 8
 max_samples: 64
 test_size: 1000
@@ -16,8 +16,8 @@ student_nfe: 25
 num_steps: 9
 num_samples: 6
 
-alpha: 0.1                       # regularization for entropy
-warming_entropy_epochs: 250      # how many epochs we use entropy regularizer 
+alpha: 0.1                         # regularization for entropy
+warming_entropy_epochs: 200        # how many epochs we use entropy regularizer 
 
 lr: 0.03
 gamma: 1                       # we don't need scheduler for now

@@ -37,7 +37,7 @@ def main(config, project_name, device, seed):
     args.checkpoint_path = os.path.join('checkpoints/cachers', timestamp)
     os.makedirs(args.checkpoint_path, exist_ok=True)
     
-    if args.name is None:
+    if not hasattr(args, 'name') or args.name is None:
         key_params = [
             f"steps={args.num_steps}",
             f"ns={args.num_samples}", 

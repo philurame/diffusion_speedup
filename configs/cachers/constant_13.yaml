@@ -11,9 +11,9 @@ max_samples: 64
 test_size: 1000
 
 gs: 5
-teacher_nfe: 25
-student_nfe: 25
-num_steps: 9
+teacher_nfe: 13
+student_nfe: 13
+num_steps: 4
 num_samples: 6
 
 alpha: 0.1                         # regularization for entropy
@@ -32,5 +32,5 @@ logit_predictor:
   model_variant: constant
   train_logits: True
   
-  init_logits: "deepcache-3"
-  baseline_stride: 3
+  init_logits: "deepcache-4"
+  baseline_stride: 4

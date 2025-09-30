@@ -440,7 +440,18 @@ def reinforce_training_loop(
     logits_grad_mean = deque([np.nan] * 8, maxlen=8)
     model_grad_mean = deque([np.nan] * 8, maxlen=8) 
     
-    optim = torch.optim.Adam(logit_model.parameters(), args.lr)
+    # optim = torch.optim.Adam(logit_model.parameters(), args.lr)
+    
+    if args.logit_predictor.model_variant == 'constant':
+        optim = torch.optim.Adam(logit_model.parameters(), args.logits_lr)
+    else:
+        optim = torch.optim.Adam(
+            [
+                {"params": logit_model.logits(), "lr": args.logits_lr},
+                {"params": logit_model.model_parameters(), "lr": args.model_lr} 
+            ]
+        )
+    
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, gamma=args.gamma)
     alphas = torch.cat([
         torch.linspace(args.alpha, 0, args.warming_entropy_epochs),

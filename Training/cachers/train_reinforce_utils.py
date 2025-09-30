@@ -10,10 +10,11 @@ import gc
 import sys
 from PIL import Image
 from tqdm import tqdm
-from munch import Munch, unmunchify
+from munch import Munch
 from collections import deque
 from datetime import datetime
 from typing import List
+from torch_ema import ExponentialMovingAverage
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
@@ -90,7 +91,8 @@ def log_validation(
     metric: torch.Tensor, 
     step: int, 
     args: Munch, 
-    run: neptune.Run
+    run: neptune.Run,
+    prefix: str = ''
 ):
     
     def concat_images(orig_imgs, gen_imgs, baseline_imgs):
@@ -151,7 +153,7 @@ def log_validation(
 
     img = resize_image(img, target_size=(512 * 3, args.logging.display_k * 512))
 
-    run['val/images'].append(
+    run[f'val/{prefix}images'].append(
         File.as_image(img),
         description=f"original vs generated vs deepcache3, step {step}",
         step=step
@@ -185,11 +187,11 @@ def log_validation(
     fig.suptitle(f"Timesteps, step {step}")
     plt.tight_layout()
     
-    run['val/timesteps_plot'].append(fig, step=step)
+    run[f'val/{prefix}timesteps_plot'].append(fig, step=step)
     
     plt.close(fig)
 
-    run[f'val/{args.metric}'].append(float(metric_value / count), step=step)
+    run[f'val/{prefix}{args.metric}'].append(float(metric_value / count), step=step)
 
 
 def log_test(
@@ -201,7 +203,8 @@ def log_test(
     epoch: int, 
     global_step: int, 
     args: Munch, 
-    run: neptune.Run
+    run: neptune.Run,
+    prefix: str = ''
 ):
 
     metric_names = ['LPIPS', 'PLPIPS', 'L1', 'AQ', 'IQ', 'HPS', 'CLIP', 'ImageReward']
@@ -218,7 +221,7 @@ def log_test(
     )
 
 
-    student_data_path = os.path.join(args.checkpoint_path, str(epoch), "images.pt")
+    student_data_path = os.path.join(args.checkpoint_path, str(epoch), f"{prefix}images.pt")
     
     imgs_student = generate_data(
         pipe, helper, logit_model, test_dataloader, test_noise, student_data_path, args, 
@@ -245,7 +248,7 @@ def log_test(
         prompts=test_prompts,
         device=args.device,
     )
-    run["metrics"].append(metrics, step=global_step)
+    run[f"{prefix}metrics"].append(metrics, step=global_step)
 
     del imgs_teacher, imgs_student
     gc.collect()
@@ -453,11 +456,18 @@ def reinforce_training_loop(
         val_noise,
         args
     )
+    
+    ema_enabled = False
+
 
     print("\nEverything ready for training!\n")
-
     
     for epoch in tqdm(range(args.epochs), 'Epochs'):
+        if epoch == args.warming_entropy_epochs:
+            ema_enabled = True
+            ema = ExponentialMovingAverage(
+                logit_model.parameters(), decay=args.ema_decay
+            )
 
         if epoch % args.logging.eval_freq == 0:
             log_validation(
@@ -465,7 +475,15 @@ def reinforce_training_loop(
                 val_dataloader, teacher_val_images, baseline_val_images,
                 metric, epoch * len(train_dataloader), args, run
             )
-        
+            
+            if ema_enabled:
+                with ema.average_parameters():
+                    log_validation(
+                        pipe, helper, logit_model, val_noise, 
+                        val_dataloader, teacher_val_images, baseline_val_images,
+                        metric, epoch * len(train_dataloader), args, run, prefix='ema_'
+                    )
+            
         for batch_idx, anns in enumerate(tqdm(train_dataloader, 'Training', leave=False)):
             prompt_embeddings = pipe.encode_prompt(anns, device=args.device)
             logits = logit_model(prompt_embeddings)
@@ -520,6 +538,18 @@ def reinforce_training_loop(
                 pipe, helper, logit_model, test_noise, 
                 test_prompts, epoch+1, global_step, args, run
             )
+            
+            if ema_enabled:
+                with ema.average_parameters():
+                    log_test(
+                        pipe, helper, logit_model, test_noise, 
+                        test_prompts, epoch+1, global_step, args, run, prefix='ema_'
+                    )
+            
+            torch.save({
+                "logit_model": logit_model.state_dict(),
+                "ema": ema.state_dict()
+            }, os.path.join(args.checkpoint_path, str(epoch+1), 'model.pt'))
 
     log_validation(
         pipe, helper, logit_model, val_noise, 

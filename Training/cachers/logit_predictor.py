@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from munch import Munch
 
-
 class BaseLogitModel(nn.Module):
     def __init__(self, n_logits: int, config: Munch, dtype=torch.float32, device=torch.device('cuda')):
         super().__init__()
@@ -37,6 +36,9 @@ class BaseLogitModel(nn.Module):
             return logits
         
         raise ValueError(f"Unknown init_logits type: {self.config.init_logits}")
+    
+    def model_parameters(self):
+        return list()
         
     def forward(self, _):
         return self.logits
@@ -71,6 +73,9 @@ class SmallMLP(BaseLogitModel):
             return prompt_embeddings[2]
         
         NotImplementedError(f'unknown prompt_extraction_variant passed, {self.config.prompt_extraction_variant}')
+        
+    def model_parameters(self):
+        return self.mlp_head.parameters()
     
     def forward(self, prompt_embeddings):
         prompt_embeddings = self.extract_prompt_embeddings(prompt_embeddings)

@@ -48,8 +48,8 @@ def log_train(
         run[f'logits/logit_{i+1}'].append(logits[i].item(), step=step)
     
     parameters = [
-        p for p in logit_model.parameters() 
-        if p.grad is not None and p.requires_grad and p is not logits
+        p for p in logit_model.model_parameters() 
+        if p.grad is not None and p.requires_grad
     ]
     
     model_norm = 0

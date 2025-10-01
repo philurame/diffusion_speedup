@@ -1,0 +1,41 @@
+name: null
+
+model_name: "REINFORCE_CACHER"
+metric: "patched-lpips"
+solver: "DDIM"
+scheduler: "LINEAR"
+
+epochs: 300
+batch_size: 1
+max_samples: 64
+test_size: 1000
+shuffle: False
+
+gs: 5
+teacher_nfe: 25
+student_nfe: 25
+num_steps: 9
+num_samples: 6
+
+alpha: 0.1                       # regularization for entropy
+warming_entropy_epochs: 200      # how many epochs we use entropy regularizer 
+
+logits_lr: 0.03
+model_lr: 0.003
+gamma: 1                       # we don't need scheduler for now
+same_train_noise: True
+ema_decay: 0.9
+
+logging:
+  eval_freq: 10
+  test_freq: 100
+  display_k: 4
+
+logit_predictor:
+  model_variant: SmallMLP
+  prompt_extraction_variant: pooled_prompt_embeds
+  embed_dim: 1280
+  dropout: 0.1
+  train_logits: True
+  
+  init_logits: "deepcache-3"

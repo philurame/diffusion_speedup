@@ -76,7 +76,8 @@ def log_train(
         'logits grad norm moving average': np.nanmean(logits_grad_mean),
         'model grad norm': model_norm,
         'model grad norm moving average': np.nanmean(model_grad_mean),
-        'lr': scheduler.get_last_lr()[0]
+        'model lr': scheduler.get_last_lr()[1],
+        'logits lr': scheduler.get_last_lr()[0]
     }, step=step)
 
 

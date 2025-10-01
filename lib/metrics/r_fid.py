@@ -15,6 +15,7 @@ class FIDMetric(FIDClass):
   img_size = 299
   @torch.inference_mode()
   def __call__(self, imgs_gen, imgs_real, batch_size=64, device=None, verbose=False, **kwargs):
+    '''in case you have wondered: values are expected to be in range (0, 1)'''
     torch.manual_seed(0)
     device = device or imgs_gen.device
     block_idx = InceptionV3.BLOCK_INDEX_BY_DIM[2048]

@@ -8,6 +8,7 @@ import clip, torch, tqdm
 
 @metric_registry.add_to_registry('AQ')
 class AQMetric:
+  '''adapted from https://github.com/LAION-AI/aesthetic-predictor'''
   # model_name_or_path='/home/jovyan/.cache/vbench/aesthetic_model/emb_reader/sa_0_4_vit_l_14_linear.pth'
   model_name_or_path='/home/jovyan/maliev/DIFFUSION_SPEEDUP/DATA/aesthetic_model/emb_reader/sa_0_4_vit_l_14_linear.pth'
   @torch.inference_mode()
@@ -23,7 +24,7 @@ class AQMetric:
     c = 0
     for i in tqdm.tqdm(range(0, len(imgs_gen), batch_size), disable=not verbose):
       image_batch = imgs_gen[i:i + batch_size]
-      image_batch = image_transform(image_batch)
+      image_batch = image_transform(image_batch)      
       image_batch = image_batch.to(device)
 
       with torch.no_grad():

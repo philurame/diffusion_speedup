@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from munch import Munch
 
-
 class BaseLogitModel(nn.Module):
     def __init__(self, n_logits: int, config: Munch, dtype=torch.float32, device=torch.device('cuda')):
         super().__init__()
@@ -31,12 +30,32 @@ class BaseLogitModel(nn.Module):
             logits[2::3] *= 0.9 # пересчитываемые логиты должны быть поменьше
             return logits
         
+        if self.config.init_logits == 'deepcache-3 smaller diff':
+            logits = torch.ones(n_logits, dtype=self.dtype) 
+            logits[2::3] *= 0.975
+            return logits
+        
+        # if self.config.init_logits == 'deepcache-3 around 0':
+        #     logits = torch.zeros(n_logits, dtype=self.dtype) 
+        #     logits -= 0.05
+        #     logits[2::3] += 0.1
+        #     return logits
+        
         if self.config.init_logits == 'deepcache-4':
             logits = torch.ones(n_logits, dtype=self.dtype) 
             logits[3::4] *= 0.9 # пересчитываемые логиты должны быть поменьше ???
             return logits
         
+        if self.config.init_logits == 'mishans':
+            logits = torch.ones(n_logits, dtype=self.dtype) 
+            to_recalculate = [0, 2, 4, 7, 10, 15, 20, 23]
+            logits[to_recalculate] *= 0.9 
+            return logits
+        
         raise ValueError(f"Unknown init_logits type: {self.config.init_logits}")
+    
+    def model_parameters(self):
+        return list()
         
     def forward(self, _):
         return self.logits
@@ -71,6 +90,9 @@ class SmallMLP(BaseLogitModel):
             return prompt_embeddings[2]
         
         NotImplementedError(f'unknown prompt_extraction_variant passed, {self.config.prompt_extraction_variant}')
+        
+    def model_parameters(self):
+        return self.mlp_head.parameters()
     
     def forward(self, prompt_embeddings):
         prompt_embeddings = self.extract_prompt_embeddings(prompt_embeddings)

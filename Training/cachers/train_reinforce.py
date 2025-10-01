@@ -43,7 +43,8 @@ def main(config, project_name, device, seed):
             f"ns={args.num_samples}", 
             f"ms={args.max_samples}",
             f"metric={args.metric}",
-            f"lr={args.lr}",
+            f"logits_lr={args.logits_lr}",
+            f"model_lr={args.model_lr}",
             f"gs={args.gs}",
             f"alpha={args.alpha}",
             f"model_variant={args.logit_predictor.model_variant}",
@@ -52,7 +53,7 @@ def main(config, project_name, device, seed):
             # f"prompt_extraction_variant={args.logit_predictor.prompt_extraction_variant}"
         ]
         args.name = "_".join(key_params)
-    run_name = f"{args.name}_{timestamp}"
+    run_name = f"{timestamp}_{args.name}"
     print(f"Generated run name: {run_name}")
 
     run = neptune.init_run(project=project_name, name=run_name)
@@ -67,7 +68,7 @@ def main(config, project_name, device, seed):
     pipe.scheduler = SolverSchedulerConstructor(config=pipe.scheduler_config)
 
     coco = COCO_SHORT()
-    train_dataloader = DataLoader(coco.prompts[:args.max_samples], batch_size=args.batch_size, shuffle=True)
+    train_dataloader = DataLoader(coco.prompts[:args.max_samples], batch_size=args.batch_size, shuffle=args.shuffle)
     val_dataloader = DataLoader(coco.prompts[-args.max_samples:], batch_size=args.batch_size, shuffle=False)
     test_prompts = coco.prompts[-args.test_size:]
 

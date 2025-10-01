@@ -11,10 +11,11 @@ import sys
 import pickle
 from PIL import Image
 from tqdm import tqdm
-from munch import Munch, unmunchify
+from munch import Munch
 from collections import deque
 from datetime import datetime
 from typing import List
+from torch_ema import ExponentialMovingAverage
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 if ROOT not in sys.path:
@@ -57,8 +58,8 @@ def log_train(
         run[f'logits/logit_{i+1}'].append(logits[i].item(), step=step)
     
     parameters = [
-        p for p in logit_model.parameters() 
-        if p.grad is not None and p.requires_grad and p is not logits
+        p for p in logit_model.model_parameters() 
+        if p.grad is not None and p.requires_grad
     ]
     
     model_norm = 0
@@ -85,7 +86,8 @@ def log_train(
         'logits grad norm moving average': np.nanmean(logits_grad_mean),
         'model grad norm': model_norm,
         'model grad norm moving average': np.nanmean(model_grad_mean),
-        'lr': scheduler.get_last_lr()[0]
+        'model lr': scheduler.get_last_lr()[1],
+        'logits lr': scheduler.get_last_lr()[0]
     }, step=step)
 
 
@@ -100,7 +102,8 @@ def log_validation(
     metric: torch.Tensor, 
     step: int, 
     args: Munch, 
-    run: neptune.Run
+    run: neptune.Run,
+    prefix: str = ''
 ):
     
     def concat_images(orig_imgs, gen_imgs, baseline_imgs):
@@ -116,6 +119,7 @@ def log_validation(
     
     original, generated = [], []
     timesteps = []
+    logits = []
     
     with torch.no_grad():
         for anns in tqdm(val_dataloader, 'Validation', leave=False):
@@ -142,6 +146,11 @@ def log_validation(
             original.append(orig.cpu())
             generated.append(gen.cpu())
             timesteps.append(ts_to_skip)
+    
+    logits = logits.detach().cpu()
+    for i in range(len(logits)):
+        run[f'val/logits/logit_{i+1}'].append(logits[i].item(), step=step)            
+
             
     original = torch.cat(original, dim=0)[-args.logging.display_k:]
     generated = torch.cat(generated, dim=0)[-args.logging.display_k:]
@@ -158,7 +167,7 @@ def log_validation(
 
     img = resize_image(img, target_size=(512 * 3, args.logging.display_k * 512))
 
-    run['val/images'].append(
+    run[f'val/{prefix}images'].append(
         File.as_image(img),
         description=f"original vs generated vs deepcache3, step {step}",
         step=step
@@ -192,11 +201,11 @@ def log_validation(
     fig.suptitle(f"Timesteps, step {step}")
     plt.tight_layout()
     
-    run['val/timesteps_plot'].append(fig, step=step)
+    run[f'val/{prefix}timesteps_plot'].append(fig, step=step)
     
     plt.close(fig)
 
-    run[f'val/{args.metric}'].append(float(metric_value / count), step=step)
+    run[f'val/{prefix}{args.metric}'].append(float(metric_value / count), step=step)
 
 
 def log_test(
@@ -208,7 +217,8 @@ def log_test(
     epoch: int, 
     global_step: int, 
     args: Munch, 
-    run: neptune.Run
+    run: neptune.Run,
+    prefix: str = ''
 ):
 
     metric_names = ['LPIPS', 'PLPIPS', 'L1', 'AQ', 'IQ', 'HPS', 'CLIP', 'ImageReward']
@@ -217,8 +227,9 @@ def log_test(
     # TEACHER MODEL
     teacher_data_path = os.path.join(
         ROOT, 'DATA', 'cachers', 'eval_data', 
-        f"teacher_test_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.test_size}.pkl"
+        f"teacher_test_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.test_size}.pt"
     )
+    
     imgs_teacher = torch.stack(list(
         generate_data(
             pipe, helper, [], test_dataloader, test_noise, teacher_data_path, args, 
@@ -227,7 +238,7 @@ def log_test(
     ))
 
     # STUDENT MODEL
-    student_data_path = os.path.join(args.checkpoint_path, str(epoch), "images.pkl")
+    student_data_path = os.path.join(args.checkpoint_path, str(epoch), f"{prefix}images.pt")
     imgs_student = torch.stack(list(
         generate_data(
             pipe, helper, logit_model, test_dataloader, test_noise, student_data_path, args, 
@@ -257,7 +268,7 @@ def log_test(
             prompts=test_prompts,
             device=args.device,
         )
-    run["metrics"].append(metrics, step=global_step)
+    run[f"{prefix}metrics"].append(metrics, step=global_step)
 
     del imgs_teacher, imgs_student
     gc.collect()
@@ -348,6 +359,7 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
         ROOT, "DATA", "cachers", "train_data", 
         f"{args.logit_predictor.init_logits}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pkl"
     )
+    
     stride = args.logit_predictor.baseline_stride
     not_cached_steps = list(range(0, int(args.teacher_nfe), stride))
     ts_to_skip = sorted(set(list(range(args.student_nfe))) - set(not_cached_steps))
@@ -425,17 +437,45 @@ def reinforce_training_loop(
     logits_grad_mean = deque([np.nan] * 8, maxlen=8)
     model_grad_mean = deque([np.nan] * 8, maxlen=8) 
     
-    optim = torch.optim.Adam(logit_model.parameters(), args.lr)
+    # optim = torch.optim.Adam(logit_model.parameters(), args.lr)
+    
+    if args.logit_predictor.model_variant == 'constant':
+        optim = torch.optim.Adam(logit_model.parameters(), args.logits_lr)
+    else:
+        optim = torch.optim.Adam(
+            [
+                {"params": logit_model.logits, "lr": args.logits_lr},
+                {"params": logit_model.model_parameters(), "lr": args.model_lr} 
+            ]
+        )
+    
     scheduler = torch.optim.lr_scheduler.ExponentialLR(optim, gamma=args.gamma)
     alphas = torch.cat([
         torch.linspace(args.alpha, 0, args.warming_entropy_epochs),
         torch.zeros(args.epochs - args.warming_entropy_epochs)
     ])
 
-    print("\nEverything ready for training!\n")
+    
+    teacher_train_images, teacher_val_images, baseline_val_images = generate_init_data(
+        pipe,
+        helper,
+        train_dataloader,
+        val_dataloader,
+        train_noise,
+        val_noise,
+        args
+    )
+    
+    ema_enabled = False
 
+    print("\nEverything ready for training!\n")
     
     for epoch in tqdm(range(args.epochs), 'Epochs'):
+        if epoch == args.warming_entropy_epochs:
+            ema_enabled = True
+            ema = ExponentialMovingAverage(
+                logit_model.parameters(), decay=args.ema_decay
+            )
 
         if epoch % args.logging.eval_freq == 0:
             log_validation(
@@ -443,7 +483,15 @@ def reinforce_training_loop(
                 val_dataloader, teacher_val_images, baseline_val_images,
                 metric, epoch * len(train_dataloader), args, run
             )
-        
+            
+            if ema_enabled:
+                with ema.average_parameters():
+                    log_validation(
+                        pipe, helper, logit_model, val_noise, 
+                        val_dataloader, teacher_val_images, baseline_val_images,
+                        metric, epoch * len(train_dataloader), args, run, prefix='ema_'
+                    )
+            
         for batch_idx, anns in enumerate(tqdm(train_dataloader, 'Training', leave=False)):
             prompt_embeddings = pipe.encode_prompt(anns, device=args.device)
             logits = logit_model(prompt_embeddings)
@@ -500,6 +548,22 @@ def reinforce_training_loop(
                 pipe, helper, logit_model, test_noise, 
                 test_prompts, epoch+1, global_step, args, run
             )
+            
+            if ema_enabled:
+                with ema.average_parameters():
+                    log_test(
+                        pipe, helper, logit_model, test_noise, 
+                        test_prompts, epoch+1, global_step, args, run, prefix='ema_'
+                    )
+            
+            saved = {
+                "logit_model": logit_model.state_dict(),
+                "optim": optim.state_dict(),
+                "scheduler": scheduler.state_dict()
+            }
+            if ema_enabled: 
+                saved["ema"] = ema.state_dict()
+            torch.save(saved, os.path.join(args.checkpoint_path, str(epoch+1), 'model.pt'))
 
     log_validation(
         pipe, helper, logit_model, val_noise, 

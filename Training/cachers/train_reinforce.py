@@ -67,7 +67,7 @@ def main(config, project_name, device, seed):
     pipe.scheduler = SolverSchedulerConstructor(config=pipe.scheduler_config)
 
     coco = COCO_SHORT()
-    train_dataloader = DataLoader(coco.prompts[:args.max_samples], batch_size=args.batch_size, shuffle=True)
+    train_dataloader = DataLoader(coco.prompts[:args.max_samples], batch_size=args.batch_size, shuffle=args.shuffle)
     val_dataloader = DataLoader(coco.prompts[-args.max_samples:], batch_size=args.batch_size, shuffle=False)
     test_prompts = coco.prompts[-args.test_size:]
 

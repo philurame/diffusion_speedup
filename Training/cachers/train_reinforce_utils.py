@@ -447,7 +447,7 @@ def reinforce_training_loop(
     else:
         optim = torch.optim.Adam(
             [
-                {"params": logit_model.logits(), "lr": args.logits_lr},
+                {"params": logit_model.logits, "lr": args.logits_lr},
                 {"params": logit_model.model_parameters(), "lr": args.model_lr} 
             ]
         )

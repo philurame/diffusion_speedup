@@ -471,10 +471,10 @@ def reinforce_training_loop(
     print("\nEverything ready for training!\n")
     
     for epoch in tqdm(range(args.epochs), 'Epochs'):
-        if epoch == args.warming_entropy_epochs:
+        if epoch == args.warming_entropy_epochs and args.logit_predictor.model_variant != 'constant':
             ema_enabled = True
             ema = ExponentialMovingAverage(
-                logit_model.parameters(), decay=args.ema_decay
+                logit_model.model_parameters(), decay=args.ema_decay
             )
 
         if epoch % args.logging.eval_freq == 0:

@@ -564,10 +564,14 @@ def reinforce_training_loop(
                         test_prompts, epoch+1, global_step, args, run, prefix='ema_'
                     )
             
-            torch.save({
+            saved = {
                 "logit_model": logit_model.state_dict(),
-                "ema": ema.state_dict()
-            }, os.path.join(args.checkpoint_path, str(epoch+1), 'model.pt'))
+                "optim": optim.state_dict(),
+                "scheduler": scheduler.state_dict()
+            }
+            if ema_enabled: 
+                saved["ema"] = ema.state_dict()
+            torch.save(saved, os.path.join(args.checkpoint_path, str(epoch+1), 'model.pt'))
 
     log_validation(
         pipe, helper, logit_model, val_noise, 

@@ -137,6 +137,11 @@ def log_validation(
             original.append(orig.cpu())
             generated.append(gen.cpu())
             timesteps.append(ts_to_skip)
+    
+    logits = logits.detach().cpu()
+    for i in range(len(logits)):
+        run[f'val/logits/logit_{i+1}'].append(logits[i].item(), step=step)            
+
             
     original = torch.cat(original, dim=0)[-args.logging.display_k:]
     generated = torch.cat(generated, dim=0)[-args.logging.display_k:]

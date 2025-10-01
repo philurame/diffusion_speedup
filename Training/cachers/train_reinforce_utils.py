@@ -343,12 +343,12 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
         ROOT, "DATA", "cachers", "train_data", 
         f"{args.logit_predictor.init_logits}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pt"
     )
-    if args.logit_predictor.init_logits == "deepcache-3":
+    if args.logging.validation == "deepcache-3":
         stride = 3
-    elif args.logit_predictor.init_logits == "deepcache-4":
+    elif args.logging.validation == "deepcache-4":
         stride = 4
     # КОСТЫЛЬ
-    elif args.logit_predictor.init_logits == "randn":
+    elif args.logging.validation == "randn":
         stride = 4
     not_cached_steps = list(range(0, int(args.teacher_nfe), stride))
     ts_to_skip = sorted(set(list(range(args.student_nfe))) - set(not_cached_steps))

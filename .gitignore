@@ -13,6 +13,7 @@ DATA/*
 !DATA/*.txt
 !DATA/quantization_data/
 !DATA/quantization_data/**
+Training/cachers/scripts/*
 
 # Ignore all notebooks except the ones in the notebooks folder
 *.ipynb

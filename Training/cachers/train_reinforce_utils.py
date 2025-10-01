@@ -222,7 +222,7 @@ def log_test(
     imgs_teacher = torch.stack(list(
         generate_data(
             pipe, helper, [], test_dataloader, test_noise, teacher_data_path, args, 
-            args.teacher_nfe, "teacher test data", is_test=True
+            args.teacher_nfe, "TEACHER TEST DATA", is_test=True
         ).values()
     ))
 
@@ -231,7 +231,7 @@ def log_test(
     imgs_student = torch.stack(list(
         generate_data(
             pipe, helper, logit_model, test_dataloader, test_noise, student_data_path, args, 
-            args.student_nfe, "student test data", is_test=True
+            args.student_nfe, "STUDENT TEST DATA", is_test=True
         ).values()
     ))
 
@@ -329,7 +329,7 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     teacher_train_data = generate_data(
         pipe, helper, [], train_dataloader, train_noise_map, 
         teacher_train_path, args, args.teacher_nfe, 
-        dataset_description="teacher train data", is_test=False
+        dataset_description="TEACHER TRAIN DATA", is_test=False
     )
 
     # TEACHER VAL DATA
@@ -340,10 +340,10 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     teacher_val_data = generate_data(
         pipe, helper, [], val_dataloader, val_noise_map, 
         teacher_val_path, args, args.teacher_nfe, 
-        dataset_description="teacher val data", is_test=False
+        dataset_description="TEACHER VAL DATA", is_test=False
     )
 
-    # DEEPCACHE3 VAL DATA
+    # BASELINE VAL DATA (DEEPCACHE)
     baseline_val_data_path = os.path.join(
         ROOT, "DATA", "cachers", "train_data", 
         f"{args.logit_predictor.init_logits}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pkl"
@@ -354,7 +354,7 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     baseline_val_data = generate_data(
         pipe, helper, ts_to_skip, val_dataloader, val_noise_map, 
         baseline_val_data_path, args, args.student_nfe, 
-        dataset_description="DEEPCACHE3 val data", is_test=False
+        dataset_description="BASELINE VAL DATA", is_test=False
     )
 
     return teacher_train_data, teacher_val_data, baseline_val_data

@@ -108,6 +108,7 @@ def log_validation(
     
     original, generated = [], []
     timesteps = []
+    logits = []
     
     with torch.no_grad():
         for batch_idx, anns in enumerate(tqdm(val_dataloader, 'Validation', leave=False)):

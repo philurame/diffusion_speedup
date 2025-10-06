@@ -37,6 +37,30 @@ def seed_everything(seed=42):
     torch.backends.cudnn.benchmark = False
 
 
+def save_pkl(obj, path: str):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        pickle.dump(obj, f)
+
+def load_pkl(path: str):
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+def load_combinations_from_file(filepath):
+    """
+    Читает комбинации из txt файла
+    Ожидаемый формат: каждая строка содержит числа через пробел или запятую
+    Например: 1 3 5 7 или 1,3,5,7
+    """
+    combinations = []
+    with open(filepath, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                combo = [int(x.strip()) for x in line.replace(',', ' ').split()]
+                combinations.append(combo)
+    return combinations
+
 def calc_metrics(metric_names, **data):
   '''calculate metrics by looping over all metrics in metrics_registry'''
 
@@ -52,16 +76,13 @@ def calc_metrics(metric_names, **data):
   return res_metrics
 
 
-def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, nfe, gs, batch_size):
-
+def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, nfe, gs):
     seed_everything()
-
-    outputs = []
+    
+    images = {}
     with torch.inference_mode():
-        for batch_idx, anns in enumerate(tqdm(test_dataloader, leave=False)):
-            batch_start = batch_idx * batch_size
-            batch_end = batch_start + len(anns)
-            current_noise = test_noise[batch_start:batch_end]
+        for anns in tqdm(test_dataloader, leave=False):
+            current_noise = torch.stack([test_noise[p] for p in anns]).to(pipe.device)
             
             with helper.inference(timesteps=ts_to_skip):
                 gen = pipe(
@@ -71,12 +92,17 @@ def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, nfe, gs
                     latents=current_noise,
                     output_type="pt"
                 )
-            outputs.append(gen)
+            
+            for p, img in zip(anns, gen):
+                img = (img + 1) * 0.5  # [-1,1] -> [0,1]
+                images[p] = img.cpu()
+                
+            del gen
+            gc.collect()
+            torch.cuda.empty_cache()
+    
+    return images
 
-    generated = torch.cat(outputs, dim=0).cpu()
-    generated = (generated + 1) * 0.5           # [-1,1] -> [0,1]
-
-    return generated
 
 @click.command()
 @click.option('--model_name',     type=str,   required=True,  default="REINFORCE_CACHER",                            help='which pipe to use')
@@ -87,8 +113,7 @@ def generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, nfe, gs
 @click.option('--test_size',      type=int,   required=True,  default=1000,                                          help='size of test data')
 @click.option('--batch_size',     type=int,   required=True,  default=8,                                             help='size of test data batch')
 @click.option('--metric_names',   type=str,   required=True,  default="LPIPS,PLPIPS,L1,AQ,IQ,HPS,CLIP,ImageReward",  help='list of metrics separated by comma')
-@click.option('--num_not_cached', type=int,   required=False, default=None,                                          help='number of steps to not cache (including step 0)')
-@click.option('--start_idx',      type=int,   required=False, default=0,                                             help='start from this combination index (0-based)')
+@click.option('--combs_file',     type=str,   required=True,                                                         help='path to txt file with combinations')
 @click.option("--device",         type=str,                   default="cuda")
 def main(**kwargs):
 
@@ -100,11 +125,11 @@ def main(**kwargs):
     test_size           = kwargs['test_size']
     batch_size          = kwargs['batch_size']
     metric_names        = [m.strip() for m in kwargs['metric_names'].split(',') if m.strip()]
-    num_not_cached      = kwargs['num_not_cached']
+    combinations_file   = kwargs['combs_file'] 
     device              = kwargs['device']
-    start_at            = kwargs['start_idx']
-    my_token            ='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI5MmRiMzUyNy0xMmIwLTQ1NDUtODQyYS1iNTMxMDk0ZmNkMzEifQ=='
 
+    combo_filename = os.path.splitext(os.path.basename(combinations_file))[0]
+    res_path = os.path.join(ROOT, "DATA", "cachers", "results", f"results_{combo_filename}.pkl")
     
     ### MODEL INITIALIZATION
     seed_everything()
@@ -121,58 +146,57 @@ def main(**kwargs):
     test_dataloader = DataLoader(coco.prompts[-test_size:], batch_size=batch_size, shuffle=False)
 
     latent_size = pipe.unet.config.sample_size
-    test_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises",  f"test_noise_{test_size}.pt")
+    test_noise_path = os.path.join(ROOT, "DATA", "cachers", "noises", f"test_noise_{test_size}.pkl")
     if os.path.exists(test_noise_path):
-        test_noise = torch.load(test_noise_path, weights_only=True).to(device)
+        test_noise = load_pkl(test_noise_path)
         print(f"\n\tLOADED NOISE FROM: {test_noise_path}")
     else:
-        test_noise = torch.randn(
-            (test_size, 4, latent_size, latent_size), dtype=pipe.dtype, device=device)
-        torch.save(
-            test_noise, 
-            test_noise_path
-        )
+        test_noise = {
+            p: torch.randn((4, latent_size, latent_size), dtype=pipe.dtype, device='cpu') 
+            for p in prompts
+        }
+        save_pkl(test_noise, test_noise_path)
         print(f"\n\tCREATED NOISE IN: {test_noise_path}")
 
     ### TEACHER MODEL
-    imgs_teacher = generate_data(pipe, helper, [], test_dataloader, test_noise, nfe, gs, batch_size)
+    imgs_teacher = generate_data(pipe, helper, [], test_dataloader, test_noise, nfe, gs)
+    imgs_teacher_tensor = torch.stack([imgs_teacher[p] for p in prompts])
 
+    all_combinations = load_combinations_from_file(combinations_file)
+    print(f"\nLOADED {len(all_combinations)} COMBINATIONS FROM: {combinations_file}")
 
-    all_results = []
-    k_select = num_not_cached - 1
-    step_space = range(1, nfe)
-    all_combinations = list(combinations(step_space, k_select))
-    print(f"\nTOTAL COMBINATIONS: {len(all_combinations)}")  
+    start_at = 0
+    if os.path.exists(res_path):
+        all_results = load_pkl(res_path)
+        print(f"\n\tLOADED EXISTING RESULTS FROM: {res_path}")
+        print(f"\tFOUND {len(all_results)} ALREADY COMPUTED RESULTS")
+        if len(all_results) > 0:
+            start_at = max(r['parameters']['combination_idx'] for r in all_results) + 1
+            print(f"\tCONTINUING FROM COMBINATION INDEX: {start_at}")
+    else:
+        all_results = []
+        print(f"\n\tNO EXISTING RESULTS FOUND, STARTING FROM SCRATCH")
+
     for combo_idx in tqdm(range(start_at, len(all_combinations)), desc="Evaluating combinations"):
         combo = all_combinations[combo_idx]
 
         ### STUDENT MODEL
-        not_cached_steps = [0] + list(combo) 
+        not_cached_steps = list(combo) 
         print("\n\tNOT CACHED:", not_cached_steps)
         all_steps_zero = list(range(nfe))
         ts_to_skip = sorted(set(all_steps_zero) - set(not_cached_steps))
-        imgs_student = generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, nfe, gs, batch_size)
-
+        imgs_student = generate_data(pipe, helper, ts_to_skip, test_dataloader, test_noise, nfe, gs)
+        imgs_student_tensor = torch.stack([imgs_student[p] for p in prompts])
+        
         metrics = calc_metrics(
             metric_names=metric_names,
-            imgs_gen=imgs_student, 
-            imgs_real=imgs_teacher, 
+            imgs_gen=imgs_student_tensor, 
+            imgs_real=imgs_teacher_tensor, 
             prompts=prompts,
             device=device,
         )
 
         ### SAVING RESULTS
-
-        # test_run_name = f"{str(not_cached_steps)}_{combo_idx}"
-        # metric_run = neptune.init_run(
-        #     project="thecrazymage/reinforce-search",
-        #     api_token=my_token,
-        #     name=test_run_name,
-        #     capture_stdout=False,
-        #     capture_stderr=False,
-        #     capture_hardware_metrics=False,
-        # )
-
         params = {
             "model_name" : model_name,
             "solver" : solver,
@@ -189,9 +213,6 @@ def main(**kwargs):
             "not_cached_timesteps": str(not_cached_steps),
         }
 
-        # metric_run["parameters"] = params
-        # metric_run["metrics"] = metrics
-
         result = {
             "parameters": params,
             "metrics": metrics
@@ -199,17 +220,13 @@ def main(**kwargs):
         
         all_results.append(result)
 
-        # metric_run.stop()
+        save_pkl(all_results, res_path)
 
-        # Save after each iteration (to prevent data loss)
-        with open("/home/jovyan/maliev/DIFFUSION_SPEEDUP/DATA/cachers/results.pkl", "wb") as f:
-            pickle.dump(all_results, f)
-
-        del imgs_student
+        del imgs_student, imgs_student_tensor
         gc.collect()
         torch.cuda.empty_cache()
 
-    del pipe, helper, test_dataloader, imgs_teacher
+    del pipe, helper, test_dataloader, imgs_teacher, imgs_teacher_tensor
     gc.collect()
     torch.cuda.empty_cache()
 

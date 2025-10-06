@@ -357,7 +357,7 @@ def generate_init_data(pipe, helper, train_dataloader, val_dataloader, train_noi
     # BASELINE VAL DATA (DEEPCACHE)
     baseline_val_data_path = os.path.join(
         ROOT, "DATA", "cachers", "train_data", 
-        f"{args.logit_predictor.init_logits}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pkl"
+        f"deepcache-{args.logit_predictor.baseline_stride}_val_{args.model_name}_{args.solver}_{args.scheduler}_{args.teacher_nfe}_{args.max_samples}.pkl"
     )
     
     stride = args.logit_predictor.baseline_stride

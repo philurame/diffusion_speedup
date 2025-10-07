@@ -75,9 +75,8 @@ def log_train(
     
     model_grad_mean.append(model_norm)
     logits_grad_mean.append(logits_grad_norm)
-    
-    
-    run["train"].append({
+
+    log_dict = {
         'train loss': loss.item(),
         f'train {args.metric} before baseline and regularization': before_baseline_and_reg.item(),
         f'train {args.metric} before baseline': before_baseline.item(),
@@ -86,9 +85,31 @@ def log_train(
         'logits grad norm moving average': np.nanmean(logits_grad_mean),
         'model grad norm': model_norm,
         'model grad norm moving average': np.nanmean(model_grad_mean),
-        'model lr': scheduler.get_last_lr()[1],
-        'logits lr': scheduler.get_last_lr()[0]
-    }, step=step)
+    }
+
+    lr_list = scheduler.get_last_lr()
+    if args.logit_predictor.model_variant == 'constant':
+        log_dict['logits lr'] = lr_list[0]
+        log_dict['model lr'] = None
+    else:
+        log_dict['logits lr'] = lr_list[0]
+        log_dict['model lr'] = lr_list[1]
+    
+    run["train"].append(log_dict, step=step)
+    
+    
+    # run["train"].append({
+    #     'train loss': loss.item(),
+    #     f'train {args.metric} before baseline and regularization': before_baseline_and_reg.item(),
+    #     f'train {args.metric} before baseline': before_baseline.item(),
+    #     'log prob': logprobs.mean().item(),
+    #     'logits grad norm': logits_grad_norm,
+    #     'logits grad norm moving average': np.nanmean(logits_grad_mean),
+    #     'model grad norm': model_norm,
+    #     'model grad norm moving average': np.nanmean(model_grad_mean),
+    #     'model lr': scheduler.get_last_lr()[1], 
+    #     'logits lr': scheduler.get_last_lr()[0]
+    # }, step=step)
 
 
 def log_validation(

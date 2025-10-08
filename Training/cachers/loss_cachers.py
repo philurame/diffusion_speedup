@@ -2,7 +2,7 @@ import torch
 import lpips
 from einops import rearrange
 
-class PatchedLPIPS:
+class PatchedLPIPS():
     def __init__(
         self, 
         patch_size = 224, 
@@ -26,11 +26,13 @@ class PatchedLPIPS:
         return patches
     
     @torch.no_grad()
-    def calculate(self, original, generated, reduction='none'):
+    def calculate(self, generated, original=None, prompts=None, reduction='none', **kwargs):
         '''
             original, generated must be in [-1, 1] (https://pypi.org/project/lpips/)
         '''
-
+        if original is None:
+            raise ValueError("PatchedLPIPS requires 'original' parameter")
+        
         B = original.shape[0]
         
         original = original.to(self.device)
@@ -49,3 +51,97 @@ class PatchedLPIPS:
             return lpips_scores.mean(dim=1)  # [B]
         elif reduction == 'mean':
             return lpips_scores.mean()
+
+
+import torch
+from torchvision.transforms.functional import to_pil_image, resize, center_crop, normalize
+from hpsv2.img_score import initialize_model, model_dict
+from hpsv2.utils import hps_version_map
+from huggingface_hub import hf_hub_download
+from hpsv2.src.open_clip import get_tokenizer
+
+
+class HPSMetric():
+    def __init__(
+        self, 
+        hps_version='v2.1',
+        device='cuda:0'
+    ):
+        self.hps_version = hps_version
+        self.device = device
+
+        initialize_model()
+        self.model = model_dict["model"].to(self.device)
+        self.model.eval()
+        for param in self.model.parameters():
+            param.requires_grad = False
+        ckpt_path  = hf_hub_download("xswu/HPSv2", hps_version_map[self.hps_version])
+        self.model.load_state_dict(torch.load(ckpt_path, map_location=self.device)["state_dict"])
+        
+        self.preprocess = model_dict["preprocess_val"]
+        self.tokenizer  = get_tokenizer("ViT-H-14")
+
+
+    @torch.no_grad()
+    def calculate(self, generated, original=None, prompts=None, **kwargs):
+
+        if prompts is None:
+            raise ValueError("HPSMetric requires 'prompts' parameter")
+        
+        images = torch.stack([
+            self.preprocess(to_pil_image(img)) 
+            for img in generated
+        ]).to(self.device)
+
+        text  = self.tokenizer(prompts).to(self.device)
+        feats = self.model(images, text)
+        score = (feats["image_features"] @ feats["text_features"].T).diagonal()
+
+        return -score   # [B]
+
+
+class PLPIPS_HPS():
+    def __init__(
+        self,
+        patch_size=224,
+        stride=160,
+        lpips_net='vgg',
+        hps_version='v2.1',
+        device='cuda:0'
+    ):
+        self.device = device
+        
+        self.patched_lpips = PatchedLPIPS(
+            patch_size=patch_size,
+            stride=stride,
+            net=lpips_net,
+            device=device
+        )
+        
+        self.hps_metric = HPSMetric(
+            hps_version=hps_version,
+            device=device
+        )
+    
+    @torch.no_grad()
+    def calculate(self, generated, original=None, prompts=None, reduction='none', **kwargs):
+
+        lpips_score = self.patched_lpips.calculate(
+            generated=generated,
+            original=original,
+            prompts=prompts,
+            reduction=reduction,
+            **kwargs
+        )
+        
+        hps_score = self.hps_metric.calculate(
+            generated=generated,
+            original=original,
+            prompts=prompts,
+            **kwargs
+        )
+
+        if reduction == 'mean':
+            hps_score = hps_score.mean()
+        
+        return lpips_score + hps_score

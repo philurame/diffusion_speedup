@@ -26,7 +26,7 @@ from lib.models.models_utils.caching_timestep_helper import CachingTimestepHelpe
 
 from Training.cachers.logit_predictor import load_logit_model, BaseLogitModel
 from Training.models import seed_everything
-from Training.cachers.loss_cachers import PatchedLPIPS
+from Training.cachers.loss_cachers import PatchedLPIPS, HPSMetric, PLPIPS_HPS
 from Training.cachers.reinforce_logic import sample_exp, top_k_log_prob
 from registries import metric_registry
 
@@ -161,7 +161,7 @@ def log_validation(
                     latents=current_noise,
                     output_type='pt'
                 )
-            metric_value += metric.calculate(orig, gen).mean().item()
+            metric_value += metric.calculate(generated=gen, original=orig, prompts=anns).mean().item()
             count += 1
             
             original.append(orig.cpu())
@@ -445,6 +445,10 @@ def reinforce_training_loop(
 
     if metric_name.lower() == "patched-lpips":
         metric = PatchedLPIPS(device=pipe.device)
+    elif metric_name.lower() == "hps":
+        metric = HPSMetric(device=pipe.device)
+    elif metric_name.lower() == "plpips_hps":
+        metric = PLPIPS_HPS(device=pipe.device)
 
     args.num_steps = args.num_steps - 1
     
@@ -475,17 +479,6 @@ def reinforce_training_loop(
         torch.linspace(args.alpha, 0, args.warming_entropy_epochs),
         torch.zeros(args.epochs - args.warming_entropy_epochs)
     ])
-
-    
-    teacher_train_images, teacher_val_images, baseline_val_images = generate_init_data(
-        pipe,
-        helper,
-        train_dataloader,
-        val_dataloader,
-        train_noise,
-        val_noise,
-        args
-    )
     
     ema_enabled = False
 
@@ -541,7 +534,11 @@ def reinforce_training_loop(
                     )
                 
                 logprobs[i] = log_prob
-                metrics[i, :] = metric.calculate(original, generated).detach()
+                metrics[i, :] = metric.calculate(
+                    generated=generated,
+                    original=original,
+                    prompts=anns
+                ).detach()
             
             metrics_mean = metrics.mean(dim=0)                                                   # without regularization
             metrics = metrics + alphas[epoch] * logprobs[:, None]                                # add entropy regularizer

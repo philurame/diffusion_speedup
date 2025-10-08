@@ -85,6 +85,8 @@ class HPSMetric():
     @torch.no_grad()
     def calculate(self, generated, original=None, prompts=None, **kwargs):
 
+        generated = (generated + 1) * 0.5 # [-1, 1] -> [0, 1]
+
         if prompts is None:
             raise ValueError("HPSMetric requires 'prompts' parameter")
         

@@ -448,7 +448,7 @@ def reinforce_training_loop(
     elif metric_name.lower() == "hps":
         metric = HPSMetric(device=pipe.device)
     elif metric_name.lower() == "plpips_hps":
-        metric = PLPIPS_HPS(device=pipe.device)
+        metric = PLPIPS_HPS(alpha_plpips=args.alpha_plpips, alpha_hps=args.alpha_hps, device=pipe.device)
 
     args.num_steps = args.num_steps - 1
     

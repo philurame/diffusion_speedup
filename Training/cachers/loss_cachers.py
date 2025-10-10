@@ -105,6 +105,8 @@ class HPSMetric():
 class PLPIPS_HPS():
     def __init__(
         self,
+        alpha_plpips=1,
+        alpha_hps=1,
         patch_size=224,
         stride=160,
         lpips_net='vgg',
@@ -112,6 +114,8 @@ class PLPIPS_HPS():
         device='cuda:0'
     ):
         self.device = device
+        self.alpha_plpips = alpha_plpips
+        self.alpha_hps = alpha_hps
         
         self.patched_lpips = PatchedLPIPS(
             patch_size=patch_size,
@@ -128,7 +132,7 @@ class PLPIPS_HPS():
     @torch.no_grad()
     def calculate(self, generated, original=None, prompts=None, reduction='none', **kwargs):
 
-        lpips_score = self.patched_lpips.calculate(
+        plpips_score = self.patched_lpips.calculate(
             generated=generated,
             original=original,
             prompts=prompts,
@@ -146,4 +150,4 @@ class PLPIPS_HPS():
         if reduction == 'mean':
             hps_score = hps_score.mean()
         
-        return lpips_score + hps_score
+        return self.alpha_plpips * plpips_score + self.alpha_hps * hps_score

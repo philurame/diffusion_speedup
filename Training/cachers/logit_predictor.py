@@ -29,6 +29,10 @@ class BaseLogitModel(nn.Module):
             logits = torch.ones(n_logits, dtype=self.dtype) 
             logits[2::3] *= 0.9 # пересчитываемые логиты должны быть поменьше
             return logits
+        if self.config.init_logits == 'deepcache-6':
+            logits = torch.ones(n_logits, dtype=self.dtype) 
+            logits[0::6] *= 0.9 # пересчитываемые логиты должны быть поменьше
+            return logits
         
         if self.config.init_logits == 'deepcache-3 smaller diff':
             logits = torch.ones(n_logits, dtype=self.dtype) 

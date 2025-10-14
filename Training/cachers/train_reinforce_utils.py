@@ -443,7 +443,7 @@ def reinforce_training_loop(
         train_noise, val_noise, args
     )
 
-    if metric_name.lower() == "patched-lpips":
+    if metric_name.lower() == "patched-lpips" or metric_name.lower() == "plpips":
         metric = PatchedLPIPS(device=pipe.device)
     elif metric_name.lower() == "hps":
         metric = HPSMetric(device=pipe.device)

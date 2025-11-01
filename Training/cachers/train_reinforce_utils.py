@@ -26,7 +26,7 @@ from lib.models.models_utils.caching_timestep_helper import CachingTimestepHelpe
 
 from Training.cachers.logit_predictor import load_logit_model, BaseLogitModel
 from Training.models import seed_everything
-from Training.cachers.loss_cachers import PatchedLPIPS, HPSMetric, PLPIPS_HPS
+from Training.cachers.loss_cachers import PatchedLPIPS, HPSMetric, PLPIPS_HPS, LPIPS, LPIPS_HPS
 from Training.cachers.reinforce_logic import sample_exp, top_k_log_prob
 from registries import metric_registry
 
@@ -445,10 +445,14 @@ def reinforce_training_loop(
 
     if metric_name.lower() == "patched-lpips" or metric_name.lower() == "plpips":
         metric = PatchedLPIPS(device=pipe.device)
+    elif metric_name.lower() == "lpips":
+        metric = LPIPS(device=pipe.device)
     elif metric_name.lower() == "hps":
         metric = HPSMetric(device=pipe.device)
     elif metric_name.lower() == "plpips_hps":
         metric = PLPIPS_HPS(alpha_plpips=args.alpha_plpips, alpha_hps=args.alpha_hps, device=pipe.device)
+    elif metric_name.lower() == "lpips_hps":
+        metric = LPIPS_HPS(alpha_lpips=args.alpha_lpips, alpha_hps=args.alpha_hps, device=pipe.device)
 
     args.num_steps = args.num_steps - 1
     

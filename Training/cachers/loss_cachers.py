@@ -2,6 +2,40 @@ import torch
 import lpips
 from einops import rearrange
 
+class LPIPS():
+    def __init__(
+        self, 
+        net = 'vgg',
+        device = 'cuda:0'
+    ):
+        self.device = device
+        self.lpips = lpips.LPIPS(net=net, spatial=False).to(device)
+        self.lpips.eval()
+        
+        for param in self.lpips.parameters():
+            param.requires_grad = False
+    
+    @torch.no_grad()
+    def calculate(self, generated, original=None, prompts=None, reduction='none', **kwargs):
+        '''
+            original, generated must be in [-1, 1] (https://pypi.org/project/lpips/)
+        '''
+        if original is None:
+            raise ValueError("LPIPS requires 'original' parameter")
+        
+        B = original.shape[0]
+        
+        original = original.to(self.device)
+        generated = generated.to(self.device)
+        
+        lpips_scores = self.lpips(original, generated)
+        lpips_scores = lpips_scores.view(B, -1)  # [B * n_patches]
+        
+        if reduction == 'none':
+            return lpips_scores.mean(dim=1)  # [B]
+        elif reduction == 'mean':
+            return lpips_scores.mean()
+
 class PatchedLPIPS():
     def __init__(
         self, 
@@ -51,7 +85,6 @@ class PatchedLPIPS():
             return lpips_scores.mean(dim=1)  # [B]
         elif reduction == 'mean':
             return lpips_scores.mean()
-
 
 import torch
 from torchvision.transforms.functional import to_pil_image, resize, center_crop, normalize
@@ -151,3 +184,49 @@ class PLPIPS_HPS():
             hps_score = hps_score.mean()
         
         return self.alpha_plpips * plpips_score + self.alpha_hps * hps_score
+
+class LPIPS_HPS():
+    def __init__(
+        self,
+        alpha_lpips=1,
+        alpha_hps=1,
+        lpips_net='vgg',
+        hps_version='v2.1',
+        device='cuda:0'
+    ):
+        self.device = device
+        self.alpha_lpips = alpha_lpips
+        self.alpha_hps = alpha_hps
+        
+        self.lpips = LPIPS(
+            net=lpips_net,
+            device=device
+        )
+        
+        self.hps_metric = HPSMetric(
+            hps_version=hps_version,
+            device=device
+        )
+    
+    @torch.no_grad()
+    def calculate(self, generated, original=None, prompts=None, reduction='none', **kwargs):
+
+        lpips_score = self.lpips.calculate(
+            generated=generated,
+            original=original,
+            prompts=prompts,
+            reduction=reduction,
+            **kwargs
+        )
+        
+        hps_score = self.hps_metric.calculate(
+            generated=generated,
+            original=original,
+            prompts=prompts,
+            **kwargs
+        )
+
+        if reduction == 'mean':
+            hps_score = hps_score.mean()
+        
+        return self.alpha_lpips * lpips_score + self.alpha_hps * hps_score

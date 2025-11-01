@@ -25,9 +25,10 @@ gamma: 1                       # we don't need scheduler for now
 same_train_noise: True
 ema_decay: 0.9
 
-metric: "patched-lpips"
-alpha_plpips: 0
-alpha_hps: 0
+metric: "lpips_hps" # plpips_hps | hps | plpips | lpips_hps | lpips
+alpha_lpips: 1
+alpha_plpips: 1
+alpha_hps: 10
 
 logging:
   eval_freq: 10
